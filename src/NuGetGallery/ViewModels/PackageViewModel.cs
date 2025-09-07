@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -15,21 +15,35 @@ namespace NuGetGallery
         public bool LatestStableVersionSemVer2 { get; set; }
         public bool DevelopmentDependency { get; set; }
         public bool Prerelease { get; set; }
-        public int DownloadCount { get; set; }
+        public string VersionRequested { get; set; }
+        public bool VersionRequestedWasNotFound { get; set; }
+        public long DownloadCount { get; set; }
         public bool Listed { get; set; }
+        public bool Locked { get; set; }
         public bool FailedValidation { get; set; }
         public bool Available { get; set; }
         public bool Validating { get; set; }
         public bool Deleted { get; set; }
-        public int TotalDownloadCount { get; set; }
+        public long TotalDownloadCount { get; set; }
         public string Id { get; set; }
         public string Version { get; set; }
         public string FullVersion { get; set; }
         public PackageStatusSummary PackageStatusSummary { get; set; }
+        public bool IsVulnerable { get; set; }
+        public bool IsDeprecated { get; set; }
+        public bool IsExactMatch { get; set; }
 
         public bool IsCurrent(IPackageVersionModel current)
         {
             return current.Version == Version && current.Id == Id;
+        }
+
+        public bool ShowDetailsAndLinks
+        {
+            get
+            {
+                return (Listed || !Locked) && (!Deleted || !Locked);
+            }
         }
     }
 }

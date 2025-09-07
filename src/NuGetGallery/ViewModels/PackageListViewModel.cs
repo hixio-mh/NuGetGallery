@@ -1,11 +1,11 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web.Mvc;
-using NuGet.Services.Entities;
+using NuGetGallery.Frameworks;
 
 namespace NuGetGallery
 {
@@ -20,7 +20,14 @@ namespace NuGetGallery
             int pageSize,
             UrlHelper url,
             bool includePrerelease,
-            bool isPreviewSearch)
+            bool isPreviewSearch,
+            string frameworks,
+            string tfms,
+            bool includeComputedFrameworks,
+            string frameworkFilterMode,
+            string packageType,
+            string sortBy,
+            bool mcpFilteringEnabled)
         {
             PageIndex = pageIndex;
             IndexTimestampUtc = indexTimestampUtc;
@@ -33,11 +40,33 @@ namespace NuGetGallery
                 packageViewModels,
                 PageIndex,
                 pageCount,
-                page => url.PackageList(page, searchTerm, includePrerelease));
+                page => url.PackageList(page, searchTerm, includePrerelease, frameworks, tfms, includeComputedFrameworks, frameworkFilterMode, packageType, sortBy));
             Items = pager.Items;
             Pager = pager;
             IncludePrerelease = includePrerelease;
             IsPreviewSearch = isPreviewSearch;
+            Frameworks = frameworks;
+            Tfms = tfms;
+            IncludeComputedFrameworks = includeComputedFrameworks;
+            FrameworkFilterMode = frameworkFilterMode;
+            PackageType = packageType;
+            SortBy = sortBy;
+            DefaultPackageType = "";
+
+            var uiSupportedPackageTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { DefaultPackageType, "All types" },
+                { "dependency", "Dependency" },
+                { "dotnettool", ".NET tool" },
+                { "template" , "Template" },
+            };
+
+            if (mcpFilteringEnabled)
+            {
+                uiSupportedPackageTypes.Add("mcpserver", "MCP Server");
+            }
+
+            UiSupportedPackageTypes = uiSupportedPackageTypes;
         }
 
         public int FirstResultIndex => 1 + (PageIndex * PageSize);
@@ -49,7 +78,7 @@ namespace NuGetGallery
 
         public int TotalCount { get; }
 
-        public string SearchTerm { get;  }
+        public string SearchTerm { get; }
 
         public int PageIndex { get; }
 
@@ -60,5 +89,31 @@ namespace NuGetGallery
         public bool IncludePrerelease { get; }
 
         public bool IsPreviewSearch { get; }
+
+        public string DefaultPackageType { get; }
+
+        public IReadOnlyDictionary<string, string> UiSupportedPackageTypes { get; }
+
+        public string Frameworks { get; set; }
+
+        public string Tfms { get; set; }
+
+        public bool IncludeComputedFrameworks { get; set; }
+
+        public string FrameworkFilterMode { get; set; }
+
+        public string PackageType { get; set; }
+
+        public string SortBy { get; set; }
+
+        public bool IsAdvancedSearchFlightEnabled { get; set; }
+
+        public bool IsFrameworkFilteringEnabled {  get; set; }
+
+        public bool IsAdvancedFrameworkFilteringEnabled { get; set; }
+
+        public Dictionary<string, FrameworkFilterHelper.FrameworkFilterGroup> FrameworkFilters = FrameworkFilterHelper.FrameworkFilters;
+
+        public string FrameworksFilteringInformationLink = "https://learn.microsoft.com/nuget/consume-packages/finding-and-choosing-packages#advanced-filtering-and-sorting";
     }
 }

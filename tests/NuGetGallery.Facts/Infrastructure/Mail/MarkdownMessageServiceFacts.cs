@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -69,8 +69,8 @@ namespace NuGetGallery
                 Assert.Equal(from, message.ReplyToList.Single());
                 Assert.Equal($"[{TestGalleryOwner.DisplayName}] Support Request for 'smangit' version 1.42.0.1 (Reason: Reason!)", message.Subject);
                 Assert.Contains("Reason!", message.Body);
-                Assert.Contains("Abuse!", message.Body);
-                Assert.Contains("too (legit@example.com)", message.Body);
+                Assert.Contains("Abuse\\!", message.Body);
+                Assert.Contains("too (legit@example\\.com)", message.Body);
                 Assert.Contains("smangit", message.Body);
                 Assert.Contains("1.42.0.1", message.Body);
                 Assert.Contains("Yes", message.Body);
@@ -385,7 +385,7 @@ namespace NuGetGallery
                 Assert.Equal(unconfirmedEmailAddress, message.To[0].Address);
                 Assert.Equal(TestGalleryNoReplyAddress.Address, message.From.Address);
                 Assert.Equal($"[{TestGalleryOwner.DisplayName}] Please verify your account", message.Subject);
-                Assert.Contains($"Thank you for {(isOrganization ? $"creating an organization on the" : $"registering with the")} {TestGalleryOwner.DisplayName}.", message.Body);
+                Assert.Contains($"Thank you for {(isOrganization ? "creating an organization on the" : "registering with the")} {TestGalleryOwner.DisplayName}.", message.Body);
                 Assert.Contains("http://example.com/confirmation-token-url", message.Body);
             }
         }
@@ -1310,8 +1310,8 @@ namespace NuGetGallery
 
                 var configurationService = GetConfigurationService();
                 var messageService = TestableMarkdownMessageService.Create(configurationService);
-                var packageUrl = $"https://packageUrl";
-                var supportUrl = $"https://supportUrl";
+                var packageUrl = "https://packageUrl";
+                var supportUrl = "https://supportUrl";
                 var announcementsUrl = "https://announcementsUrl";
                 var twitterUrl = "https://twitterUrl";
 
@@ -1345,7 +1345,7 @@ namespace NuGetGallery
                 }
                 else
                 {
-                    Assert.Contains($"You can reupload your package once you've fixed the issue with it.", message.Body);
+                    Assert.Contains("You can reupload your package once you've fixed the issue with it.", message.Body);
                 }
             }
 
@@ -1372,7 +1372,7 @@ namespace NuGetGallery
                         return "This package must be signed with a registered certificate. [Read more...](https://aka.ms/nuget-signed-ref)";
                     case ValidationIssueCode.PackageIsSignedWithUnauthorizedCertificate:
                         var certIssue = (UnauthorizedCertificateFailure)validationIssue;
-                        return $"The package was signed, but the signing certificate (SHA-1 thumbprint {certIssue.Sha1Thumbprint}) is not associated with your account. You must register this certificate to publish signed packages. [Read more...](https://aka.ms/nuget-signed-ref)";
+                        return $"The package was signed, but the signing certificate (SHA-256 thumbprint {certIssue.Sha256Thumbprint}) is not associated with your account. You must register this certificate to publish signed packages. [Read more...](https://aka.ms/nuget-signed-ref)";
                     default:
                         return "There was an unknown failure when validating your package.";
                 }
@@ -1426,8 +1426,8 @@ namespace NuGetGallery
                 Assert.Contains($"[{TestGalleryOwner.DisplayName}] Package validation taking longer than expected - {packageRegistration.Id} {nugetVersion.ToNormalizedString()}", message.Subject);
                 Assert.Contains(
                     $"It is taking longer than expected for your package [{packageRegistration.Id} {nugetVersion.ToFullString()}]({packageUrl}) to get published." + Environment.NewLine + Environment.NewLine +
-                    $"We are looking into it and there is no action on you at this time. We’ll send you an email notification when your package has been published." + Environment.NewLine + Environment.NewLine +
-                    $"Thank you for your patience.", message.Body);
+                    "We are looking into it and there is no action on you at this time. We’ll send you an email notification when your package has been published." + Environment.NewLine + Environment.NewLine +
+                    "Thank you for your patience.", message.Body);
             }
 
             public static IEnumerable<object[]> EmailSettingsCombinations
@@ -1636,7 +1636,7 @@ namespace NuGetGallery
                 Assert.Equal($"[{TestGalleryOwner.DisplayName}] Organization transformation for account '{accountToTransform.Username}'", message.Subject);
                 Assert.Contains($"We have received a request to transform account '{accountToTransform.Username}' into an organization with user '{adminUser.Username}' as its admin.", message.Body);
                 Assert.Contains($"[{cancelUrl}]({cancelUrl})", message.Body);
-                Assert.Contains($"If you did not request this change, please contact support by responding to this email.", message.Body);
+                Assert.Contains("If you did not request this change, please contact support by responding to this email.", message.Body);
             }
 
             [Fact]
@@ -2170,8 +2170,8 @@ namespace NuGetGallery
                 Assert.Contains($"[{TestGalleryOwner.DisplayName}] Symbol package validation taking longer than expected - {packageRegistration.Id} {nugetVersion.ToNormalizedString()}", message.Subject);
                 Assert.Contains(
                     $"It is taking longer than expected for your symbol package [{packageRegistration.Id} {nugetVersion.ToFullString()}]({packageUrl}) to get published." + Environment.NewLine + Environment.NewLine +
-                    $"We are looking into it and there is no action on you at this time. We’ll send you an email notification when your symbol package has been published." + Environment.NewLine + Environment.NewLine +
-                    $"Thank you for your patience.", message.Body);
+                    "We are looking into it and there is no action on you at this time. We’ll send you an email notification when your symbol package has been published." + Environment.NewLine + Environment.NewLine +
+                    "Thank you for your patience.", message.Body);
             }
         }
 
@@ -2253,8 +2253,8 @@ namespace NuGetGallery
 
                 var configurationService = GetConfigurationService();
                 var messageService = TestableMarkdownMessageService.Create(configurationService);
-                var packageUrl = $"https://packageUrl";
-                var supportUrl = $"https://supportUrl";
+                var packageUrl = "https://packageUrl";
+                var supportUrl = "https://supportUrl";
                 var announcementsUrl = "https://announcementsUrl";
                 var twitterUrl = "https://twitterUrl";
 
@@ -2288,7 +2288,7 @@ namespace NuGetGallery
                 }
                 else
                 {
-                    Assert.Contains($"You can reupload your symbol package once you've fixed the issue with it.", message.Body);
+                    Assert.Contains("You can reupload your symbol package once you've fixed the issue with it.", message.Body);
                 }
             }
 
@@ -2315,7 +2315,7 @@ namespace NuGetGallery
                         return "This package must be signed with a registered certificate. [Read more...](https://aka.ms/nuget-signed-ref)";
                     case ValidationIssueCode.PackageIsSignedWithUnauthorizedCertificate:
                         var certIssue = (UnauthorizedCertificateFailure)validationIssue;
-                        return $"The package was signed, but the signing certificate (SHA-1 thumbprint {certIssue.Sha1Thumbprint}) is not associated with your account. You must register this certificate to publish signed packages. [Read more...](https://aka.ms/nuget-signed-ref)";
+                        return $"The package was signed, but the signing certificate (SHA-256 thumbprint {certIssue.Sha256Thumbprint}) is not associated with your account. You must register this certificate to publish signed packages. [Read more...](https://aka.ms/nuget-signed-ref)";
                     case ValidationIssueCode.SymbolErrorCode_ChecksumDoesNotMatch:
                         return "The checksum does not match for the dll(s) and corresponding pdb(s).";
                     case ValidationIssueCode.SymbolErrorCode_MatchingAssemblyNotFound:

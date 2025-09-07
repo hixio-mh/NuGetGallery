@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Web.Http.Results;
 using Moq;
 using NuGet.Services.Entities;
 using NuGet.Versioning;
@@ -47,6 +48,72 @@ namespace NuGetGallery.Controllers
         }
 
         [Fact]
+        public async Task Get_ReturnsBadRequestWhenOrderByInvalidColumn()
+        {
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.Get(options),
+                "/api/v2/Packages?$orderby=abc");
+
+            // Assert
+            Assert.IsType<BadRequestErrorMessageResult>(resultSet);
+        }
+
+        [Fact]
+        public async Task GetAll_ReturnsBadRequestNonHijackedIsDisabledAndQueryCannotBeHijacked()
+        {
+            // Arrange
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService.Setup(x => x.IsODataV2GetAllNonHijackedEnabled()).Returns(false);
+
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.Get(options),
+                "/api/v2/Packages?$orderby=Version",
+                featureFlagService);
+
+            // Assert
+            await VerifyODataDeprecation(resultSet, Strings.ODataParametersDisabled);
+            featureFlagService.Verify(x => x.IsODataV2GetAllNonHijackedEnabled());
+        }
+
+        [Fact]
+        public async Task GetAllCount_ReturnsBadRequestNonHijackedIsDisabledAndQueryCannotBeHijacked()
+        {
+            // Arrange
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService.Setup(x => x.IsODataV2GetAllCountNonHijackedEnabled()).Returns(false);
+
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.GetCount(options),
+                "/api/v2/Packages/$count?$orderby=Version",
+                featureFlagService);
+
+            // Assert
+            await VerifyODataDeprecation(resultSet, Strings.ODataParametersDisabled);
+            featureFlagService.Verify(x => x.IsODataV2GetAllCountNonHijackedEnabled());
+        }
+
+        [Fact]
+        public async Task GetSpecific_ReturnsBadRequestNonHijackedIsDisabledAndQueryCannotBeHijacked()
+        {
+            // Arrange
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService.Setup(x => x.IsODataV2GetSpecificNonHijackedEnabled()).Returns(false);
+
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.Get(options, TestPackageId, "1.0.0"),
+                $"/api/v2/Packages(Id='{TestPackageId}',Version='1.0.0')?$filter=1 eq 1",
+                featureFlagService);
+
+            // Assert
+            await VerifyODataDeprecation(resultSet, Strings.ODataParametersDisabled);
+            featureFlagService.Verify(x => x.IsODataV2GetSpecificNonHijackedEnabled());
+        }
+
+        [Fact]
         public async Task GetCount_FiltersSemVerV2PackageVersionsByDefault()
         {
             // Act
@@ -85,6 +152,42 @@ namespace NuGetGallery.Controllers
             // Assert
             AssertSemVer2PackagesFilteredFromResult(resultSet);
             Assert.Equal(NonSemVer2Packages.Count, resultSet.Count);
+        }
+
+        [Fact]
+        public async Task FindPackagesById_ReturnsBadRequestNonHijackedIsDisabledAndQueryCannotBeHijacked()
+        {
+            // Arrange
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService.Setup(x => x.IsODataV2FindPackagesByIdNonHijackedEnabled()).Returns(false);
+
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.FindPackagesById(options, TestPackageId),
+                $"/api/v2/FindPackagesById?id='{TestPackageId}'&$orderby=Version",
+                featureFlagService);
+
+            // Assert
+            await VerifyODataDeprecation(resultSet, Strings.ODataParametersDisabled);
+            featureFlagService.Verify(x => x.IsODataV2FindPackagesByIdNonHijackedEnabled());
+        }
+
+        [Fact]
+        public async Task FindPackagesByIdCount_ReturnsBadRequestNonHijackedIsDisabledAndQueryCannotBeHijacked()
+        {
+            // Arrange
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService.Setup(x => x.IsODataV2FindPackagesByIdCountNonHijackedEnabled()).Returns(false);
+
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.FindPackagesByIdCount(options, TestPackageId),
+                $"/api/v2/FindPackagesById/$count?id='{TestPackageId}'&$orderby=Version",
+                featureFlagService);
+
+            // Assert
+            await VerifyODataDeprecation(resultSet, Strings.ODataParametersDisabled);
+            featureFlagService.Verify(x => x.IsODataV2FindPackagesByIdCountNonHijackedEnabled());
         }
 
         [Theory]
@@ -133,6 +236,42 @@ namespace NuGetGallery.Controllers
         }
 
         [Fact]
+        public async Task Search_ReturnsBadRequestNonHijackedIsDisabledAndQueryCannotBeHijacked()
+        {
+            // Arrange
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService.Setup(x => x.IsODataV2SearchNonHijackedEnabled()).Returns(false);
+
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.Search(options, TestPackageId),
+                $"/api/v2/Search?searchTerm='{TestPackageId}'&$orderby=Version",
+                featureFlagService);
+
+            // Assert
+            await VerifyODataDeprecation(resultSet, Strings.ODataParametersDisabled);
+            featureFlagService.Verify(x => x.IsODataV2SearchNonHijackedEnabled());
+        }
+
+        [Fact]
+        public async Task SearchCount_ReturnsBadRequestNonHijackedIsDisabledAndQueryCannotBeHijacked()
+        {
+            // Arrange
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService.Setup(x => x.IsODataV2SearchCountNonHijackedEnabled()).Returns(false);
+
+            // Act
+            var resultSet = await GetActionResultAsync<V2FeedPackage>(
+                (controller, options) => controller.SearchCount(options, TestPackageId),
+                $"/api/v2/Search/$count?searchTerm='{TestPackageId}'&$orderby=Version",
+                featureFlagService);
+
+            // Assert
+            await VerifyODataDeprecation(resultSet, Strings.ODataParametersDisabled);
+            featureFlagService.Verify(x => x.IsODataV2SearchCountNonHijackedEnabled());
+        }
+
+        [Fact]
         public async Task Search_FiltersSemVerV2PackageVersionsByDefault_IncludePrerelease()
         {
             // Act
@@ -161,7 +300,7 @@ namespace NuGetGallery.Controllers
 
             // Assert
             AssertSemVer2PackagesFilteredFromResult(resultSet);
-            Assert.Equal(NonSemVer2Packages.Where(p => !p.IsPrerelease).Count(), resultSet.Count);
+            Assert.Equal(NonSemVer2Packages.Count(p => !p.IsPrerelease), resultSet.Count);
         }
 
         [Fact]
@@ -470,7 +609,7 @@ namespace NuGetGallery.Controllers
             foreach (var feedPackage in resultSet)
             {
                 // Assert none of the items in the result set are SemVer v.2.0.0 packages (checking on original version is enough in this case)
-                Assert.Empty(SemVer2Packages.Where(p => string.Equals(p.Version, feedPackage.Version)));
+                Assert.DoesNotContain(SemVer2Packages, p => string.Equals(p.Version, feedPackage.Version));
 
                 // Assert each of the items in the result set is a non-SemVer v2.0.0 package
                 Assert.Single(NonSemVer2Packages.Where(p =>

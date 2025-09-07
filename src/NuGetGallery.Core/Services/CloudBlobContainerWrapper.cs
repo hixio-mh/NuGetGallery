@@ -1,77 +1,117 @@
 ﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
 
 namespace NuGetGallery
 {
     public class CloudBlobContainerWrapper : ICloudBlobContainer
     {
-        private readonly CloudBlobContainer _blobContainer;
+        private readonly CloudBlobClientWrapper _account;
+        private readonly BlobContainerClient _blobContainer;
 
-        public CloudBlobContainerWrapper(CloudBlobContainer blobContainer)
+        public CloudBlobContainerWrapper(BlobContainerClient blobContainer, CloudBlobClientWrapper account)
         {
-            _blobContainer = blobContainer;
+            _blobContainer = blobContainer ?? throw new ArgumentNullException(nameof(blobContainer));
+            _account = account ?? throw new ArgumentNullException(nameof(account));
         }
 
         public async Task<ISimpleBlobResultSegment> ListBlobsSegmentedAsync(
             string prefix,
             bool useFlatBlobListing,
-            BlobListingDetails blobListingDetails,
+            ListingDetails blobListingDetails,
             int? maxResults,
-            BlobContinuationToken blobContinuationToken,
-            BlobRequestOptions options,
-            OperationContext operationContext,
+            BlobListContinuationToken blobContinuationToken,
+            TimeSpan? requestTimeout,
+            CloudBlobLocationMode? cloudBlobLocationMode,
             CancellationToken cancellationToken)
         {
-            var segment = await _blobContainer.ListBlobsSegmentedAsync(
-                prefix,
-                useFlatBlobListing,
-                blobListingDetails,
-                maxResults,
-                blobContinuationToken,
-                options,
-                operationContext,
-                cancellationToken);
+            string continuationToken = blobContinuationToken?.ContinuationToken;
 
-            return new BlobResultSegmentWrapper(segment);
+            BlobContainerClient blobContainerClient = _blobContainer;
+            if (cloudBlobLocationMode.HasValue)
+            {
+                blobContainerClient = _account.CreateBlobContainerClient(cloudBlobLocationMode.Value, _blobContainer.Name, requestTimeout) ?? blobContainerClient;
+            }
+            else if (requestTimeout.HasValue)
+            {
+                blobContainerClient = _account.CreateBlobContainerClient(_blobContainer.Name, requestTimeout.Value);
+            }
+
+            BlobTraits traits = CloudWrapperHelpers.GetSdkBlobTraits(blobListingDetails);
+            BlobStates states = CloudWrapperHelpers.GetSdkBlobStates(blobListingDetails);
+            var enumerable = blobContainerClient
+                .GetBlobsAsync(traits: traits, states: states, prefix: prefix, cancellationToken: cancellationToken)
+                .AsPages(continuationToken, maxResults);
+
+            var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
+            try
+            {
+                if (await CloudWrapperHelpers.WrapStorageExceptionAsync(() => enumerator.MoveNextAsync().AsTask()))
+                {
+                    var page = enumerator.Current;
+                    var nextContinuationToken = string.IsNullOrEmpty(page.ContinuationToken) ? null : page.ContinuationToken;
+                    return new BlobResultSegmentWrapper(page.Values.Select(x => GetBlobReference(x)).ToList(), nextContinuationToken);
+                }
+            }
+            finally
+            {
+                await enumerator.DisposeAsync();
+            }
+
+            return new BlobResultSegmentWrapper(new List<ISimpleCloudBlob>(), null);
         }
-
-        public Task CreateIfNotExistAsync()
+        
+        public async Task CreateIfNotExistAsync(bool enablePublicAccess)
         {
-            return Task.Factory.FromAsync<bool>(
-                _blobContainer.BeginCreateIfNotExists(null, null), 
-                _blobContainer.EndCreateIfNotExists);
-        }
+            var accessType = enablePublicAccess ? PublicAccessType.Blob : PublicAccessType.None;
 
-        public Task SetPermissionsAsync(BlobContainerPermissions permissions)
-        {
-            return Task.Factory.FromAsync(
-                _blobContainer.BeginSetPermissions(permissions, null, null),
-                _blobContainer.EndSetPermissions);
+            await CloudWrapperHelpers.WrapStorageExceptionAsync(() =>
+                _blobContainer.CreateIfNotExistsAsync(accessType));
         }
 
         public ISimpleCloudBlob GetBlobReference(string blobAddressUri)
         {
-            return new CloudBlobWrapper(_blobContainer.GetBlockBlobReference(blobAddressUri));
+            return new CloudBlobWrapper(_blobContainer.GetBlockBlobClient(blobAddressUri), this);
         }
 
-        public Task<bool> ExistsAsync(BlobRequestOptions blobRequestOptions, OperationContext context)
+        private ISimpleCloudBlob GetBlobReference(BlobItem item)
         {
-            return _blobContainer.ExistsAsync(blobRequestOptions, context);
+            return new CloudBlobWrapper(_blobContainer.GetBlockBlobClient(item.Name), item, this);
+        }
+
+        public async Task<bool> ExistsAsync(CloudBlobLocationMode? cloudBlobLocationMode)
+        {
+            BlobContainerClient containerClient = _blobContainer;
+            if (cloudBlobLocationMode.HasValue)
+            {
+                containerClient = _account.CreateBlobContainerClient(cloudBlobLocationMode.Value, _blobContainer.Name) ?? containerClient;
+            }
+            return (await CloudWrapperHelpers.WrapStorageExceptionAsync(() =>
+                containerClient.ExistsAsync())).Value;
         }
 
         public async Task<bool> DeleteIfExistsAsync()
         {
-            return await _blobContainer.DeleteIfExistsAsync();
+            return await CloudWrapperHelpers.WrapStorageExceptionAsync(() =>
+                _blobContainer.DeleteIfExistsAsync());
         }
 
-        public async Task CreateAsync()
+        public async Task CreateAsync(bool enablePublicAccess)
         {
-            await _blobContainer.CreateAsync();
+            var accessType = enablePublicAccess ? PublicAccessType.Blob : PublicAccessType.None;
+
+            await CloudWrapperHelpers.WrapStorageExceptionAsync(() =>
+                _blobContainer.CreateAsync(accessType));
         }
+
+        internal CloudBlobClientWrapper Account => _account;
     }
 }

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!-- 
     Microsoft ResX Schema 
@@ -225,6 +225,9 @@
   <data name="CredentialRemoved" xml:space="preserve">
     <value>The credential has been removed.</value>
   </data>
+  <data name="TrustedPolicyRemoved" xml:space="preserve">
+    <value>The policy has been removed.</value>
+  </data>
   <data name="PasswordChanged" xml:space="preserve">
     <value>Your password has been changed.</value>
   </data>
@@ -317,19 +320,19 @@
     <value>The package framework '{0}' is not supported. Frameworks within the portable profile are not allowed to have profiles themselves.</value>
   </data>
   <data name="PackageEntryFromTheFuture" xml:space="preserve">
-    <value>The package is invalid and cannot be uploaded. One or more files, such as '{0}' have a date in the future.</value>
+    <value>The package is invalid and cannot be published. One or more files, such as '{0}' have a date in the future.</value>
   </data>
   <data name="AzureActiveDirectory_SignInMessage" xml:space="preserve">
-    <value>Sign in with Azure Active Directory</value>
+    <value>Sign in with Microsoft Entra ID</value>
   </data>
   <data name="AzureActiveDirectory_AccountNoun" xml:space="preserve">
-    <value>Azure Active Directory account</value>
+    <value>Microsoft Entra ID account</value>
   </data>
   <data name="ApiKeyCanNotBeDefaultGuid" xml:space="preserve">
     <value>API key can not be the default Guid.</value>
   </data>
   <data name="WarningApiKeyAboutToExpire" xml:space="preserve">
-    <value>Your API key expires in {0} days. Visit {1} to regenerate your API key.</value>
+    <value>Your API key expires in {0}. Visit {1} to regenerate your API key.</value>
   </data>
   <data name="WarningApiKeyExpired" xml:space="preserve">
     <value>Your API key has expired. Visit {0} to generate a new API key.</value>
@@ -348,21 +351,6 @@
   </data>
   <data name="UserAccountLocked" xml:space="preserve">
     <value>Your account was locked after too many unsuccessful sign-in attempts. Please try again in {0}.</value>
-  </data>
-  <data name="ScopeDescription_All" xml:space="preserve">
-    <value>All</value>
-  </data>
-  <data name="ScopeDescription_PushPackage" xml:space="preserve">
-    <value>Push new packages and package versions</value>
-  </data>
-  <data name="ScopeDescription_PushPackageVersion" xml:space="preserve">
-    <value>Push only new package versions</value>
-  </data>
-  <data name="ScopeDescription_UnlistPackage" xml:space="preserve">
-    <value>Unlist package</value>
-  </data>
-  <data name="ScopeDescription_Unknown" xml:space="preserve">
-    <value>Unknown</value>
   </data>
   <data name="ApiKeyDescriptionRequired" xml:space="preserve">
     <value>Can't generate an API key without a description.</value>
@@ -384,9 +372,6 @@
   </data>
   <data name="NonScopedApiKeyDescription" xml:space="preserve">
     <value>Full access API key</value>
-  </data>
-  <data name="ScopeDescription_VerifyPackage" xml:space="preserve">
-    <value>Verify package ownership</value>
   </data>
   <data name="WarningApiDeprecated" xml:space="preserve">
     <value>API '{0}' is deprecated and may be removed in a future version.</value>
@@ -485,7 +470,7 @@ For more information, please contact '{2}'.</value>
     <value>The new password does not match the verify password field.</value>
   </data>
   <data name="AzureActiveDirectory_RegisterMessage" xml:space="preserve">
-    <value>Register with Azure Active Directory</value>
+    <value>Register with Microsoft Entra ID</value>
   </data>
   <data name="ReservedNamespace_InvalidCharactersInNamespace" xml:space="preserve">
     <value>The namespace '{0}' contains invalid characters. Examples of valid namespaces include 'MyNamespace', 'MyNamespace.' or 'MyNamespace-' etc.</value>
@@ -515,7 +500,10 @@ For more information, please contact '{2}'.</value>
     <value>The ID prefix of this package has been reserved for one of the owners of this package by NuGet.org.</value>
   </data>
   <data name="UploadPackage_IdNamespaceConflict" xml:space="preserve">
-    <value>This package ID has been reserved. Please request access to upload to this reserved namespace from the owner of the reserved prefix, or re-upload the package with a different ID.</value>
+    <value>This package ID has been reserved. Please request access to upload to this reserved namespace from the owner of the reserved prefix, or re-upload the package with a different ID. Go to https://docs.microsoft.com/nuget/reference/id-prefix-reservation learn more about Package ID prefix reservation.</value>
+  </data>
+  <data name="UploadPackage_IdNamespaceConflictHtml" xml:space="preserve">
+    <value>This package ID has been reserved. Please request access to upload to this reserved namespace from the owner of the reserved prefix, or re-upload the package with a different ID. &lt;a href="https://docs.microsoft.com/nuget/reference/id-prefix-reservation"&gt;Learn more about Package ID prefix reservation&lt;/a&gt;.</value>
   </data>
   <data name="PreviewReadMe_ConversionFailed" xml:space="preserve">
     <value>Conversion of Markdown to HTML failed with '{0}'.</value>
@@ -534,6 +522,12 @@ For more information, please contact '{2}'.</value>
   </data>
   <data name="ReadMeUrlHostInvalid" xml:space="preserve">
     <value>The Documentation URL must be a raw Markdown file hosted on GitHub.</value>
+  </data>
+  <data name="UploadPackage_MissingReadmeHtml" xml:space="preserve">
+    <value>&lt;strong&gt;Readme&lt;/strong&gt; missing.&lt;a href="https://aka.ms/nuget-include-readme"&gt; See how to include a readme file within the package&lt;/a&gt;, or add it as you upload.</value>
+  </data>
+  <data name="UploadPackage_MissingReadme" xml:space="preserve">
+    <value>Readme missing. Go to https://aka.ms/nuget-include-readme learn How to include a readme file within the package.</value>
   </data>
   <data name="ReservedNamespace_OwnerAdded" xml:space="preserve">
     <value>The user '{0}' is now an owner of the prefix '{1}'.</value>
@@ -751,10 +745,10 @@ If you would like to update the linked Microsoft account you can do so from the 
     <value>Successfully linked the Microsoft account ({0}). Note that the email address associated with the new linked Microsoft account is different than the NuGet.org account email ({1}).</value>
   </data>
   <data name="AddMember_UserDoesNotMeetOrganizationPolicy" xml:space="preserve">
-    <value>User '{0}' has not linked their account to an AAD credential matching this organization.</value>
+    <value>User '{0}' has not linked their account to a Microsoft Entra ID credential matching this organization.</value>
   </data>
   <data name="Organizations_AdminAccountDoesNotHaveTenant" xml:space="preserve">
-    <value>Administrator account '{0}' is not linked to an AAD credential with an organization tenant.</value>
+    <value>Administrator account '{0}' is not linked to a Microsoft Entra ID credential with an organization tenant.</value>
   </data>
   <data name="DeleteMember_CannotRemoveLastAdmin" xml:space="preserve">
     <value>You can't leave the organization. In order to leave the organization, another collaborator must be assigned as an administrator.</value>
@@ -900,7 +894,7 @@ If you would like to update the linked Microsoft account you can do so from the 
 Policy violations: {0}</value>
   </data>
   <data name="SecurityPolicy_RequirePackagePrefixReserved" xml:space="preserve">
-    <value>You have not published a package with this prefix in the past. This means other users may be able to push packages starting with the same prefix. Contact account@nuget.org to reserve the prefix. Go to https://docs.microsoft.com/en-us/nuget/reference/id-prefix-reservation to learn more about Package ID prefix reservation.</value>
+    <value>You have not published a package with this prefix in the past. This means other users may be able to push packages starting with the same prefix. Contact account@nuget.org to reserve the prefix. Go to https://docs.microsoft.com/nuget/reference/id-prefix-reservation to learn more about Package ID prefix reservation.</value>
   </data>
   <data name="SecurityPolicy_CopyrightNotCompliant" xml:space="preserve">
     <value>The package metadata contains a non-compliant copyright element.</value>
@@ -1030,14 +1024,14 @@ The {1} Team</value>
   </data>
   <data name="UploadPackage_FileDoesNotExist" xml:space="preserve">
     <value>The {0} file '{1}' does not exist in the package.</value>
-    <comment>{0} is the type of file ('license', 'icon', etc.), {1} is the file name specified in the .nuspec</comment>
+    <comment>{0} is the type of file ('license', 'icon', 'readme', etc.), {1} is the file name specified in the .nuspec</comment>
   </data>
   <data name="UploadPackage_LicenseMustBePlainText" xml:space="preserve">
     <value>The license file must be plain text using UTF-8 encoding.</value>
   </data>
   <data name="UploadPackage_FileTooLong" xml:space="preserve">
     <value>The {0} file cannot be larger than {1}.</value>
-    <comment>{0} is the file type ('license', 'icon', etc.), {1} is the string representation max allowed license file size (in whatever units the caller chooses)</comment>
+    <comment>{0} is the file type ('license', 'icon', 'readme', etc.), {1} is the string representation max allowed license file size (in whatever units the caller chooses)</comment>
   </data>
   <data name="UploadPackage_NodeContainsChildren" xml:space="preserve">
     <value>The {0} node cannot contain child nodes.</value>
@@ -1067,6 +1061,12 @@ The {1} Team</value>
   </data>
   <data name="UploadPackage_LearnMore" xml:space="preserve">
     <value>Learn more</value>
+  </data>
+  <data name="UploadPackage_LicenseShouldBeSpecifiedHtmlV2" xml:space="preserve">
+    <value>&lt;strong&gt;License&lt;/strong&gt; missing.</value>
+  </data>
+  <data name="UploadPackage_LicenseShouldBeSpecifiedV2" xml:space="preserve">
+    <value>License missing.</value>
   </data>
   <data name="UploadPackage_LicenseShouldBeSpecified" xml:space="preserve">
     <value>All published packages should have license information specified.</value>
@@ -1158,5 +1158,151 @@ The {1} Team</value>
   </data>
   <data name="TwoFAFeedback_Error" xml:space="preserve">
     <value>There was an unexpected error when submitting feedback. Please contact NuGet support.</value>
+  </data>
+  <data name="PackageUploadCancelled" xml:space="preserve">
+    <value>The package upload failed due to the client disconnecting.</value>
+  </data>
+  <data name="UploadPackage_EmbeddedReadmeNotAccepted" xml:space="preserve">
+    <value>The &lt;readme&gt; element is not currently supported.</value>
+  </data>
+  <data name="UploadPackage_InvalidReadmeFileExtension" xml:space="preserve">
+    <value>The readme file has an invalid extension '{0}'. The extension must be: '{1}'.</value>
+    <comment>{0} is the readme file extension specified in the .nuspec, {1} is the list of allowed extensions</comment>
+  </data>
+  <data name="UploadPackage_ReadmeFileType" xml:space="preserve">
+    <value>readme</value>
+  </data>
+  <data name="UploadPackage_ReadmeMustBePlainText" xml:space="preserve">
+    <value>The readme file must be plain text using UTF-8 encoding.</value>
+  </data>
+  <data name="UploadPackage_InvalidReadmeName" xml:space="preserve">
+    <value>the name of &lt;readme&gt; element is case sensitive, must use the &lt;readme&gt;</value>
+  </data>
+  <data name="ODataDisabled" xml:space="preserve">
+    <value>This OData endpoint has been disabled. Please refer to the following URL for more information about this deprecation: https://aka.ms/nuget/odata-deprecation</value>
+  </data>
+  <data name="ODataParametersDisabled" xml:space="preserve">
+    <value>The combination of parameters provided to this OData endpoint is no longer supported. Please refer to the following URL for more information about this deprecation: https://aka.ms/nuget/odata-deprecation</value>
+  </data>
+  <data name="ReadmeNotEditableWithEmbeddedReadme" xml:space="preserve">
+    <value>The readme is not editable with the package has the embedded readme</value>
+  </data>
+  <data name="UploadPackage_LearnMore_PackagingLicenseV2" xml:space="preserve">
+    <value>See how to include a license within the package</value>
+  </data>
+  <data name="UploadPackage_LearnMore_PackagingLicense" xml:space="preserve">
+    <value>Learn more about including a license within the package</value>
+  </data>
+  <data name="UploadPackage_LearnMore_IconUrlDeprecation" xml:space="preserve">
+    <value>Learn more about icon URL deprecation</value>
+  </data>
+  <data name="UploadPackage_LearnMore_InvalidLicenseUrlEncoding" xml:space="preserve">
+    <value>Learn more about invalid license URL encoding</value>
+  </data>
+  <data name="UploadPackage_LearnMore_LicenseUrlDreprecation" xml:space="preserve">
+    <value>Learn more about license URL deprecation</value>
+  </data>
+  <data name="DeletePackage_NotAllowed" xml:space="preserve">
+    <value>Deleting a package through the API is not enabled for your user account.</value>
+  </data>
+  <data name="DeletePackage_InvalidDeleteType" xml:space="preserve">
+    <value>The provided Type in the delete request is not valid.</value>
+  </data>
+  <data name="DeletePackage_TooManyDownloads" xml:space="preserve">
+    <value>The provided package has more than {0} downloads and therefore cannot be deleted via API.</value>
+    <comment>{0} is the download count limit.</comment>
+  </data>
+  <data name="UploadPackage_OwnerlessIdNamespaceConflict" xml:space="preserve">
+    <value>The package ID is reserved. You can upload your package with a different package ID. Reach out to support@nuget.org if you have questions.</value>
+  </data>
+  <data name="UploadPackage_OwnerlessIdNamespaceConflictHtml" xml:space="preserve">
+    <value>The package ID is reserved. You can upload your package with a different package ID. Reach out to &lt;a href="mailto:support@nuget.org"&gt;support@nuget.org&lt;/a&gt; if you have questions.</value>
+  </data>
+  <data name="ReadmeErrorEmpty" xml:space="preserve">
+    <value>The readme file '{0}' cannot be empty.</value>
+  </data>
+  <data name="ApiKeyOwnerLocked" xml:space="preserve">
+    <value>The specified API key is scoped to an owner that is locked. Please contact support@nuget.org.</value>
+  </data>
+  <data name="SupportedFrameworks_EmptyVersionTooltip" xml:space="preserve">
+    <value>This package is compatible with all versions of this framework.</value>
+  </data>
+  <data name="SupportedFrameworks_Tooltip" xml:space="preserve">
+    <value>This package is compatible with this framework or higher.</value>
+  </data>
+  <data name="NuGetAccountPasswordLoginUnsupported" xml:space="preserve">
+    <value>NuGet.org password login is no longer supported.</value>
+  </data>
+  <data name="ForgotPassword_Disabled" xml:space="preserve">
+    <value>Forgot password flow has been disabled. Please reach out to your Microsoft account support to sign into NuGet gallery.</value>
+  </data>
+  <data name="ForgotPassword_Disabled_Error" xml:space="preserve">
+    <value>Forgot password is disabled.</value>
+  </data>
+  <data name="Emails_ApiKeyRevoked_Body" xml:space="preserve">
+    <value>Your API Key '{0}' has been revoked. If you did not request this change, please reply to this email to contact support.</value>
+  </data>
+  <data name="Emails_ApiKeyRevoked_Subject" xml:space="preserve">
+    <value>[{0}] API Key '{1}' Revoked</value>
+  </data>
+  <data name="PackageEntryWithDoubleBackSlash" xml:space="preserve">
+    <value>The package is invalid and cannot be published. The package entry for '{0}' has a  double back slashes in path.</value>
+  </data>
+  <data name="PackageEntryWithDoubleForwardSlash" xml:space="preserve">
+    <value>The package is invalid and cannot be published. The package entry for '{0}' has a  double forward slashes in path, which is causing a file name collision during extraction.</value>
+  </data>
+  <data name="InvalidPackageEntry" xml:space="preserve">
+    <value>The package is invalid and cannot be uploaded. The package entry for '{0}' is not valid.</value>
+  </data>
+  <data name="SupportedFrameworks_Asset_Tooltip" xml:space="preserve">
+    <value>This package targets {0}. The package is compatible with this framework or higher.</value>
+  </data>
+  <data name="SupportedFrameworks_Computed_Tooltip" xml:space="preserve">
+    <value>This package is compatible with {0} or higher.</value>
+  </data>
+  <data name="SupportedFrameworks_EmptyVersion_Template_Tooltip" xml:space="preserve">
+    <value>This package is compatible with all versions of {0}.</value>
+  </data>
+  <data name="FrameworkFilters_Tooltip" xml:space="preserve">
+    <value>Filters packages based on the target frameworks they are compatible with.</value>
+  </data>
+  <data name="UploadPackage_NuspecContainsInvalidUnicodeCharacters" xml:space="preserve">
+    <value>The package nuspec file contains invalid unicode characters.</value>
+  </data>
+  <data name="UploadPackage_NuspecIsNotNormalized" xml:space="preserve">
+    <value>The package nuspec file is not compliant with the normalization form C (NFC).</value>
+  </data>
+  <data name="SearchResult_ExactMatch" xml:space="preserve">
+    <value>exact match</value>
+  </data>
+  <data name="McpServerMetadataErrorEmpty" xml:space="preserve">
+    <value>The MCP server metadata file '{0}' cannot be empty.</value>
+  </data>
+  <data name="McpServerMetadataErrorInvalid" xml:space="preserve">
+    <value>The MCP server metadata file '{0}' is invalid.</value>
+  </data>
+  <data name="UploadPackage_MissingMcpServerMetadata" xml:space="preserve">
+    <value>Server.json missing. Go to https://aka.ms/nuget-include-mcp to learn how to include a server.json file within the package.</value>
+  </data>
+  <data name="UploadPackage_MissingMcpServerMetadataHtml" xml:space="preserve">
+    <value>&lt;strong&gt;Server.json&lt;/strong&gt; missing.&lt;a href="https://aka.ms/nuget-include-mcp"&gt; See how to include a server.json file within the package.</value>
+  </data>
+  <data name="McpServerWithoutDotnetTool" xml:space="preserve">
+    <value>A package cannot contain the 'McpServer' package type without the 'DotnetTool' package type.</value>
+  </data>
+  <data name="McpServerMetadataTooLong" xml:space="preserve">
+    <value>The MCP server metadata file '{0}' cannot be larger than {1}.</value>
+  </data>
+  <data name="GitHub_WhatIsUniqueId" xml:space="preserve">
+    <value>A permanent GitHub ID assigned to a user, organization, or repository when it's created. Used for trusted publishing validation.</value>
+  </data>
+  <data name="TrustedPublisher_PolicyNameRequired" xml:space="preserve">
+    <value>The trusted publisher policy name is required.</value>
+  </data>
+  <data name="TrustedPublisher_PolicyOwnerRequired" xml:space="preserve">
+    <value>The trusted publisher policy owner is required.</value>
+  </data>
+  <data name="TrustedPublisher_Unexpected" xml:space="preserve">
+    <value>Unexpected trusted publisher.</value>
   </data>
 </root>

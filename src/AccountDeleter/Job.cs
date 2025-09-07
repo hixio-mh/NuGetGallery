@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -27,6 +27,7 @@ using NuGetGallery.Diagnostics;
 using NuGetGallery.Features;
 using NuGetGallery.Infrastructure.Authentication;
 using NuGetGallery.Security;
+using ConfigConstants = NuGet.Services.Configuration.Constants;
 
 namespace NuGetGallery.AccountDeleter
 {
@@ -104,6 +105,13 @@ namespace NuGetGallery.AccountDeleter
             services.AddScoped<ITelemetryClient, TelemetryClientWrapper>(
                 sp => TelemetryClientWrapper.UseTelemetryConfiguration(ApplicationInsightsConfiguration.TelemetryConfiguration));
 
+            services.AddScoped<ICloudBlobClient>(serviceProvider =>
+            {
+                var options = serviceProvider.GetRequiredService<IOptionsSnapshot<AccountDeleteConfiguration>>();
+                return CloudBlobClientWrapper.UsingMsi(options.Value.GalleryStorageConnectionString,
+                    configurationRoot[ConfigConstants.StorageManagedIdentityClientIdPropertyName]);
+            });
+
             ConfigureGalleryServices(services);
         }
 
@@ -135,9 +143,12 @@ namespace NuGetGallery.AccountDeleter
                 services.AddScoped<IAuthenticationService, AuthenticationService>();
                 services.AddScoped<ISupportRequestService, ISupportRequestService>();
 
+                services.AddScoped<IFeatureFlagService, EmptyFeatureFlagService>();
                 services.AddScoped<IEditableFeatureFlagStorageService, EditableFeatureFlagFileStorageService>();
                 services.AddScoped<ICoreFileStorageService, CloudBlobFileStorageService>();
                 services.AddScoped<ICloudBlobContainerInformationProvider, GalleryCloudBlobContainerInformationProvider>();
+
+                services.AddScoped<IUrlHelper, AccountDeleteUrlHelper>();
 
                 services.AddScoped<IIndexingService, EmptyIndexingService>();
                 services.AddScoped<ICredentialBuilder, CredentialBuilder>();
@@ -157,14 +168,6 @@ namespace NuGetGallery.AccountDeleter
                     return new SupportRequestDbContext(connection);
                 });
 
-                services.AddScoped<ICloudBlobClient>(sp =>
-                {
-                    var options = sp.GetRequiredService<IOptionsSnapshot<AccountDeleteConfiguration>>();
-                    var optionsSnapshot = options.Value;
-
-                    return new CloudBlobClientWrapper(optionsSnapshot.GalleryStorageConnectionString, readAccessGeoRedundant: true);
-                });
-
                 services.AddScoped<ITelemetryService, TelemetryService>();
                 services.AddScoped<ISecurityPolicyService, SecurityPolicyService>();
                 services.AddScoped<IAppConfiguration, GalleryConfiguration>();
@@ -177,7 +180,7 @@ namespace NuGetGallery.AccountDeleter
             }
         }
 
-        protected override void ConfigureAutofacServices(ContainerBuilder containerBuilder)
+        protected override void ConfigureAutofacServices(ContainerBuilder containerBuilder, IConfigurationRoot configurationRoot)
         {
             ConfigureDefaultSubscriptionProcessor(containerBuilder);
             containerBuilder.RegisterType<EntityRepository<User>>()

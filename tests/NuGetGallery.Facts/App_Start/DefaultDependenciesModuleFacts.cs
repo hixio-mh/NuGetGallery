@@ -3,18 +3,17 @@
 
 using System;
 using System.Collections.Generic;
-using Microsoft.ApplicationInsights;
+using System.Data.SqlClient;
 using Microsoft.ApplicationInsights.DependencyCollector;
 using Microsoft.ApplicationInsights.Extensibility;
-using Microsoft.ApplicationInsights.Extensibility.Implementation;
 using Microsoft.ApplicationInsights.Extensibility.Implementation.ApplicationId;
-using Microsoft.ApplicationInsights.Extensibility.Implementation.Tracing;
-using Microsoft.ApplicationInsights.Extensibility.PerfCounterCollector;
 using Microsoft.ApplicationInsights.Extensibility.PerfCounterCollector.QuickPulse;
 using Microsoft.ApplicationInsights.Web;
 using Microsoft.ApplicationInsights.WindowsServer;
 using Microsoft.ApplicationInsights.WindowsServer.TelemetryChannel;
+using Moq;
 using NuGet.Services.Logging;
+using NuGet.Services.Sql;
 using NuGetGallery.Configuration;
 using Xunit;
 
@@ -74,9 +73,7 @@ namespace NuGetGallery.App_Start
 
                 // Assert
                 Assert.NotNull(telemetryClient);
-                Assert.IsType<TelemetryClientWrapper>(telemetryClient);
-
-                var telemetryClientWrapper = (TelemetryClientWrapper)telemetryClient;
+                var telemetryClientWrapper = Assert.IsType<TelemetryClientWrapper>(telemetryClient);
 
                 Assert.Equal(
                     _appConfiguration.AppInsightsInstrumentationKey,
@@ -117,8 +114,7 @@ namespace NuGetGallery.App_Start
 
                 // Assert
                 Assert.NotNull(aiConfiguration.TelemetryConfiguration.ApplicationIdProvider);
-                Assert.IsType(
-                    typeof(ApplicationInsightsApplicationIdProvider),
+                Assert.IsType<ApplicationInsightsApplicationIdProvider>(
                     aiConfiguration.TelemetryConfiguration.ApplicationIdProvider);
             }
 
@@ -131,8 +127,7 @@ namespace NuGetGallery.App_Start
                     out var _);
 
                 Assert.NotNull(aiConfiguration.TelemetryConfiguration.DefaultTelemetrySink);
-                Assert.IsType(
-                    typeof(ServerTelemetryChannel),
+                Assert.IsType<ServerTelemetryChannel>(
                     aiConfiguration.TelemetryConfiguration.DefaultTelemetrySink.TelemetryChannel);
 
                 // We can't use Assert.Collection here as Application Insights auto-registers
@@ -187,6 +182,42 @@ namespace NuGetGallery.App_Start
                 }
 
                 return elementInspectors.ToArray();
+            }
+        }
+
+        public class TheCreateDbConnectionMethod
+        {
+            [Fact]
+            public void TriesSyncBeforeAsync()
+            {
+                var connectionFactoryMock = new Mock<ISqlConnectionFactory>();
+                connectionFactoryMock
+                    .Setup(cf => cf.TryCreate(out It.Ref<SqlConnection>.IsAny))
+                    .Returns(true);
+
+                DefaultDependenciesModule.CreateDbConnection(connectionFactoryMock.Object, Mock.Of<ITelemetryService>());
+                connectionFactoryMock
+                    .Verify(cf => cf.TryCreate(out It.Ref<SqlConnection>.IsAny), Times.Once);
+                connectionFactoryMock
+                    .Verify(cf => cf.CreateAsync(), Times.Never);
+            }
+
+            [Fact]
+            public void FallsBackToAsyncIfSyncFails()
+            {
+                var connectionFactoryMock = new Mock<ISqlConnectionFactory>();
+                connectionFactoryMock
+                    .Setup(cf => cf.TryCreate(out It.Ref<SqlConnection>.IsAny))
+                    .Returns(false);
+                connectionFactoryMock
+                    .Setup(cf => cf.CreateAsync())
+                    .ReturnsAsync((SqlConnection)null);
+
+                DefaultDependenciesModule.CreateDbConnection(connectionFactoryMock.Object, Mock.Of<ITelemetryService>());
+                connectionFactoryMock
+                    .Verify(cf => cf.TryCreate(out It.Ref<SqlConnection>.IsAny), Times.Once);
+                connectionFactoryMock
+                    .Verify(cf => cf.CreateAsync(), Times.Once);
             }
         }
     }

@@ -1,10 +1,9 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Security.Claims;
 using System.Web.Helpers;
 using System.Web.Hosting;
@@ -14,8 +13,7 @@ using System.Web.Mvc;
 using System.Web.Optimization;
 using System.Web.Routing;
 using System.Web.UI;
-using Elmah;
-using Microsoft.WindowsAzure.ServiceRuntime;
+using Microsoft.Extensions.DependencyInjection;
 using NuGetGallery;
 using NuGetGallery.Configuration;
 using NuGetGallery.Diagnostics;
@@ -116,14 +114,15 @@ namespace NuGetGallery
 
             BundleTable.Bundles.Add(stylesBundle);
 
-            // Add scripts bundles
+            // Bootstrap is no longer bundled in site.min.css given that the package that does the minification
+            // cannot understand new CSS feature, instead we are using Grunt to create a bootstrap.min.css file
+            // for all bootstrap styles.
             var newStyleBundle = new StyleBundle("~/Content/gallery/css/site.min.css");
             newStyleBundle
-                .Include("~/Content/gallery/css/bootstrap.css")
-                .Include("~/Content/gallery/css/bootstrap-theme.css")
                 .Include("~/Content/gallery/css/fabric.css");
             BundleTable.Bundles.Add(newStyleBundle);
 
+            // Add scripts bundles
             var instrumentationBundle = new ScriptBundle("~/Scripts/gallery/instrumentation.min.js")
                 .Include("~/Scripts/gallery/instrumentation.js");
             BundleTable.Bundles.Add(instrumentationBundle);
@@ -132,9 +131,9 @@ namespace NuGetGallery
                 .Include("~/Scripts/gallery/jquery-3.4.1.js")
                 .Include("~/Scripts/gallery/jquery.validate-1.16.0.js")
                 .Include("~/Scripts/gallery/jquery.validate.unobtrusive-3.2.6.js")
-                .Include("~/Scripts/gallery/knockout-3.4.2.js")
+                .Include("~/Scripts/gallery/knockout-3.5.1.js")
                 .Include("~/Scripts/gallery/bootstrap.js")
-                .Include("~/Scripts/gallery/moment-2.18.1.js")
+                .Include("~/Scripts/gallery/moment-2.29.4.js")
                 .Include("~/Scripts/gallery/common.js")
                 .Include("~/Scripts/gallery/autocomplete.js");
             BundleTable.Bundles.Add(scriptBundle);
@@ -170,6 +169,10 @@ namespace NuGetGallery
                 .Include("~/Scripts/gallery/clamp.js");
             BundleTable.Bundles.Add(displayPackageScriptBundle);
 
+            var listPackagesScriptBundle = new ScriptBundle("~/Scripts/gallery/page-list-packages.min.js")
+                .Include("~/Scripts/gallery/page-list-packages.js");
+            BundleTable.Bundles.Add(listPackagesScriptBundle);
+
             var managePackagesScriptBundle = new ScriptBundle("~/Scripts/gallery/page-manage-packages.min.js")
                 .Include("~/Scripts/gallery/page-manage-packages.js");
             BundleTable.Bundles.Add(managePackagesScriptBundle);
@@ -194,9 +197,19 @@ namespace NuGetGallery
                 .Include("~/Scripts/gallery/page-about.js");
             BundleTable.Bundles.Add(aboutScriptBundle);
 
+            var downloadsScriptBundle = new ScriptBundle("~/Scripts/gallery/page-downloads.min.js")
+                .Include("~/Scripts/gallery/page-downloads.js");
+            BundleTable.Bundles.Add(downloadsScriptBundle);
+
             var apiKeysScriptBundle = new ScriptBundle("~/Scripts/gallery/page-api-keys.min.js")
+                .Include("~/Scripts/gallery/idle-timer.js")
                 .Include("~/Scripts/gallery/page-api-keys.js");
             BundleTable.Bundles.Add(apiKeysScriptBundle);
+
+            var trustedPublishingScriptBundle = new ScriptBundle("~/Scripts/gallery/page-trusted-publishing.min.js")
+                .Include("~/Scripts/gallery/idle-timer.js")
+                .Include("~/Scripts/gallery/page-trusted-publishing.js");
+            BundleTable.Bundles.Add(trustedPublishingScriptBundle);
 
             var accountScriptBundle = new ScriptBundle("~/Scripts/gallery/page-account.min.js")
                 .Include("~/Scripts/gallery/page-account.js");
@@ -210,6 +223,10 @@ namespace NuGetGallery
                 .Include("~/Scripts/gallery/page-add-organization.js")
                 .Include("~/Scripts/gallery/md5.js");
             BundleTable.Bundles.Add(addOrganizationScriptBundle);
+
+            var syntaxhighlightScriptBundle = new ScriptBundle("~/Scripts/gallery/syntaxhighlight.min.js")
+                .Include("~/Scripts/gallery/syntaxhighlight.js");
+            BundleTable.Bundles.Add(syntaxhighlightScriptBundle);
 
             // This is needed for the Admin database viewer.
             ScriptManager.ScriptResourceMapping.AddDefinition("jquery",
@@ -239,7 +256,7 @@ namespace NuGetGallery
             // Log unhandled exceptions
             GlobalConfiguration.Configuration.Services.Add(typeof(IExceptionLogger), new QuietExceptionLogger());
 
-            Routes.RegisterRoutes(RouteTable.Routes, configuration.FeedOnlyMode);
+            Routes.RegisterRoutes(RouteTable.Routes, configuration.FeedOnlyMode, configuration.AdminPanelEnabled);
             AreaRegistration.RegisterAllAreas();
 
             GlobalFilters.Filters.Add(new SendErrorsToTelemetryAttribute { View = "~/Views/Errors/InternalError.cshtml" });
@@ -265,10 +282,17 @@ namespace NuGetGallery
                 if (cloudDownloadCountService != null)
                 {
                     // Perform initial refresh + schedule new refreshes every 15 minutes
-                    HostingEnvironment.QueueBackgroundWorkItem(cancellationToken => cloudDownloadCountService.Refresh());
-                    jobs.Add(new CloudDownloadCountServiceRefreshJob(TimeSpan.FromMinutes(15), cloudDownloadCountService));
+                    HostingEnvironment.QueueBackgroundWorkItem(_ => cloudDownloadCountService.RefreshAsync());
+                    jobs.Add(new CloudDownloadCountServiceRefreshJob(TimeSpan.FromMinutes(15),
+                        cloudDownloadCountService));
                 }
             }
+
+            // Perform initial refresh for vulnerabilities cache + schedule new refreshes every 30 minutes
+            var packageVulnerabilitiesCacheService = DependencyResolver.Current.GetService<IPackageVulnerabilitiesCacheService>();
+            var serviceScopeFactory = DependencyResolver.Current.GetService<IServiceScopeFactory>();
+            HostingEnvironment.QueueBackgroundWorkItem(_ => packageVulnerabilitiesCacheService.RefreshCache(serviceScopeFactory));
+            jobs.Add(new PackageVulnerabilitiesCacheRefreshJob(TimeSpan.FromMinutes(30), packageVulnerabilitiesCacheService, serviceScopeFactory));
 
             if (jobs.AnySafe())
             {
@@ -277,7 +301,7 @@ namespace NuGetGallery
                 {
                     RestartSchedulerOnFailure = true
                 };
-                _jobManager.Fail(e => ErrorLog.GetDefault(null).Log(new Error(e)));
+                _jobManager.Fail(e => { Trace.TraceError($"{nameof(BackgroundJobsPostStart)} failure: {e.Message}"); });
                 _jobManager.Start();
             }
         }

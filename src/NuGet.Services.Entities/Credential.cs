@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -13,7 +13,7 @@ namespace NuGet.Services.Entities
     {
         /// <summary>
         /// Represents a credential used by NuGet Gallery. Can be an API key credential,
-        /// username/password or external credential like Microsoft Account or Azure Active Directory.
+        /// username/password or external credential like Microsoft Account or Microsoft Entra ID.
         /// </summary>
         public Credential()
         {
@@ -23,7 +23,7 @@ namespace NuGet.Services.Entities
 
         /// <summary>
         /// Represents a credential used by NuGet Gallery. Can be an API key credential,
-        /// username/password or external credential like Microsoft Account or Azure Active Directory.
+        /// username/password or external credential like Microsoft Account or Microsoft Entra ID.
         /// </summary>
         /// <param name="type">Credential type. See <see cref="CredentialTypes"/></param>
         /// <param name="value">Credential value</param>
@@ -36,7 +36,7 @@ namespace NuGet.Services.Entities
 
         /// <summary>
         /// Represents a credential used by NuGet Gallery. Can be an API key credential,
-        /// username/password or external credential like Microsoft Account or Azure Active Directory.
+        /// username/password or external credential like Microsoft Account or Microsoft Entra ID.
         /// </summary>
         /// <param name="type">Credential type. See <see cref="CredentialTypes"/></param>
         /// <param name="value">Credential value</param>
@@ -84,9 +84,15 @@ namespace NuGet.Services.Entities
 
         public CredentialRevocationSource? RevocationSourceKey { get; set; }
 
+        public bool? WasCreatedSecurely { get; set; }
+
+        public int? FederatedCredentialPolicyKey { get; set; }
+
         public virtual User User { get; set; }
 
         public virtual ICollection<Scope> Scopes { get; set; }
+
+        public virtual FederatedCredentialPolicy FederatedCredentialPolicy { get; set; }
 
         [NotMapped]
         public bool HasExpired

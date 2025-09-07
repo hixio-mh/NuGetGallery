@@ -1,8 +1,7 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Security.Cryptography;
 
@@ -10,7 +9,7 @@ namespace NuGetGallery
 {
     public sealed class CertificateFile : IDisposable
     {
-        private static readonly byte[] EmptyBuffer = new byte[0];
+        private static readonly byte[] EmptyBuffer = Array.Empty<byte>();
 
         public string Sha1Thumbprint { get; }
         public string Sha256Thumbprint { get; }
@@ -63,10 +62,12 @@ namespace NuGetGallery
             }
         }
 
-        [SuppressMessage("Microsoft.Security.Cryptography", "CA5354:SHA1CannotBeUsed", Justification = @"SHA1 thumbprint is only used to distinguish certificates in the Gallery view.")]
         private static string GetSha1Thumbprint(MemoryStream stream)
         {
+#pragma warning disable CA5350 // Do Not Use Weak Cryptographic Algorithms
+            // CodeQL [SM02196] Calculated for backwards compatibility, it is not used for anything
             using (var hashAlgorithm = SHA1.Create())
+#pragma warning restore CA5350 // Do Not Use Weak Cryptographic Algorithms
             {
                 return GetThumbprint(stream, hashAlgorithm);
             }

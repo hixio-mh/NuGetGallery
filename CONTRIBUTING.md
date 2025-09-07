@@ -16,9 +16,9 @@ A lot of the issues that arise in our tracker are things we'd like to do and wou
 1. Make sure there is an issue in the [Issue Tracker](https://github.com/NuGet/NuGetGallery/issues) for the feature or bug you want to fix. If not, create one!
   * **Pull Requests without an associated issue will not be accepted!**
 1. Create a fork in GitHub
-1. Create a branch off of the **master** branch. Name it something which easily links it back to the issue. For example: "Bug-1234".
+1. Create a branch off of the **dev** branch. Name it something which easily links it back to the issue. For example: "Bug-1234".
 1. Make your changes
-1. Send a Pull Request from your branch to the **master** branch.
+1. Send a Pull Request from your branch to the **dev** branch.
 
 If you mess up the branching or get confused, that's OK, we'd rather have your contribution than have you waste a lot of time figuring out our branches. However, using the right branches will help us immensely and will make it much easier for us to quickly accept your contribution!
 
@@ -67,3 +67,11 @@ namespace NuGetGallery.FolderName.SubFolderName
     }
 }
 ```
+
+## Contributor License Agreement
+
+Most contributions require you to agree to the [.NET Foundation Contributor License Agreement (CLA)](https://cla.dotnetfoundation.org) declaring that you have the right to, and actually do, grant us the rights to use your contribution.
+
+When you submit a pull request, a CLA-bot will automatically determine whether you need to provide a CLA and decorate the PR appropriately (e.g., label, comment). Simply follow the instructions provided by the bot. You will only need to do this once across all projects in the .NET Foundation.
+
+This project has adopted the code of conduct defined by the Contributor Covenant to clarify expected behavior in our community. For more information, see the [.NET Foundation Code of Conduct](https://dotnetfoundation.org/code-of-conduct).

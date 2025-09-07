@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel.DataAnnotations;
-using System.Web.DynamicData;
 using System.Web;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 
-namespace NuGetGallery {
+namespace NuGetGallery
+{
     public partial class DateTime_EditField : System.Web.DynamicData.FieldTemplateUserControl {
         private static DataTypeAttribute DefaultDateAttribute = new DataTypeAttribute(DataType.DateTime);
         protected void Page_Load(object sender, EventArgs e) {
@@ -36,8 +36,7 @@ namespace NuGetGallery {
         }
     
         protected void DateValidator_ServerValidate(object source, ServerValidateEventArgs args) {
-            DateTime dummyResult;
-            args.IsValid = DateTime.TryParse(args.Value, out dummyResult);
+            args.IsValid = DateTime.TryParse(args.Value, out _);
         }
     
         protected override void ExtractValues(IOrderedDictionary dictionary) {

@@ -1,6 +1,7 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+#pragma warning disable CA3147 // No need to validate Antiforgery Token with API request
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -36,6 +37,7 @@ namespace NuGetGallery
         : AppController
     {
         private const string NuGetExeUrl = "https://dist.nuget.org/win-x86-commandline/v2.8.6/nuget.exe";
+        private const string PackageDeleteApiReason = "Deleted via API";
         private readonly IAutocompletePackageIdsQuery _autocompletePackageIdsQuery;
         private readonly IAutocompletePackageVersionsQuery _autocompletePackageVersionsQuery;
 
@@ -190,17 +192,42 @@ namespace NuGetGallery
         [ActionName("GetSymbolPackageApi")]
         public virtual async Task<ActionResult> GetSymbolPackage(string id, string version)
         {
-            return await GetPackageInternal(id, version, isSymbolPackage: true);
+            // some security paranoia about URL hacking somehow creating e.g. open redirects
+            // validate user input: explicit calls to the same validators used during Package Registrations
+            // Ideally shouldn't be necessary?
+            if (!PackageIdValidator.IsValidPackageId(id ?? string.Empty))
+            {
+                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, "The format of the package id is invalid");
+            }
+
+            if (string.IsNullOrEmpty(version))
+            {
+                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, "Version is required");
+            }
+
+            // Check if version semantically correct
+            if (!NuGetVersion.TryParse(version, out NuGetVersion dummy))
+            {
+                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, "The package version is not a valid semantic version");
+            }
+
+            // Normalize the version
+            version = NuGetVersionFormatter.Normalize(version);
+
+            // There's no guarantee the symbols package exists in the returned path. We just provide the path it should be at.
+            return await SymbolPackageFileService.CreateDownloadSymbolPackageActionResultAsync(
+                    HttpContext.Request.Url,
+                    id, version);
         }
 
         [HttpGet]
         [ActionName("GetPackageApi")]
         public virtual async Task<ActionResult> GetPackage(string id, string version)
         {
-            return await GetPackageInternal(id, version, isSymbolPackage: false);
+            return await GetPackageInternal(id, version);
         }
 
-        protected internal async Task<ActionResult> GetPackageInternal(string id, string version, bool isSymbolPackage = false)
+        protected internal async Task<ActionResult> GetPackageInternal(string id, string version)
         {
             // some security paranoia about URL hacking somehow creating e.g. open redirects
             // validate user input: explicit calls to the same validators used during Package Registrations
@@ -216,24 +243,13 @@ namespace NuGetGallery
                 if (!string.IsNullOrEmpty(version))
                 {
                     // if version is non-null, check if it's semantically correct and normalize it.
-                    NuGetVersion dummy;
-                    if (!NuGetVersion.TryParse(version, out dummy))
+                    if (!NuGetVersion.TryParse(version, out NuGetVersion dummy))
                     {
                         return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, "The package version is not a valid semantic version");
                     }
 
                     // Normalize the version
                     version = NuGetVersionFormatter.Normalize(version);
-
-                    if (isSymbolPackage)
-                    {
-                        package = PackageService.FindPackageByIdAndVersionStrict(id, version);
-
-                        if (package == null)
-                        {
-                            return new HttpStatusCodeWithBodyResult(HttpStatusCode.NotFound, string.Format(CultureInfo.CurrentCulture, Strings.PackageWithIdAndVersionNotFound, id, version));
-                        }
-                    }
                 }
                 else
                 {
@@ -268,30 +284,14 @@ namespace NuGetGallery
                 return new HttpStatusCodeWithBodyResult(HttpStatusCode.ServiceUnavailable, Strings.DatabaseUnavailable_TrySpecificVersion);
             }
 
-            if (isSymbolPackage)
+            if (ConfigurationService.Features.TrackPackageDownloadCountInLocalDatabase)
             {
-                var latestAvailableSymbolsPackage = package.LatestAvailableSymbolPackage();
-
-                if (latestAvailableSymbolsPackage == null)
-                {
-                    return new HttpStatusCodeWithBodyResult(HttpStatusCode.NotFound, string.Format(CultureInfo.CurrentCulture, Strings.SymbolsPackage_PackageNotAvailable, id, version));
-                }
-
-                return await SymbolPackageFileService.CreateDownloadSymbolPackageActionResultAsync(
-                    HttpContext.Request.Url,
-                    id, version);
+                await PackageService.IncrementDownloadCountAsync(id, version);
             }
-            else
-            {
-                if (ConfigurationService.Features.TrackPackageDownloadCountInLocalDatabase)
-                {
-                    await PackageService.IncrementDownloadCountAsync(id, version);
-                }
 
-                return await PackageFileService.CreateDownloadPackageActionResultAsync(
-                    HttpContext.Request.Url,
-                    id, version);
-            }
+            return await PackageFileService.CreateDownloadPackageActionResultAsync(
+                HttpContext.Request.Url,
+                id, version);
         }
 
         [HttpGet]
@@ -329,6 +329,7 @@ namespace NuGetGallery
         [ApiAuthorize]
         [ApiScopeRequired(NuGetScopes.PackagePush, NuGetScopes.PackagePushVersion)]
         [ActionName("CreatePackageVerificationKey")]
+        // CodeQL [SM00433] This endpoint uses API Key authentication
         public virtual async Task<ActionResult> CreatePackageVerificationKeyAsync(string id, string version)
         {
             // For backwards compatibility, we must preserve existing behavior where the client always pushes
@@ -425,6 +426,7 @@ namespace NuGetGallery
         [ApiAuthorize]
         [ApiScopeRequired(NuGetScopes.PackagePush, NuGetScopes.PackagePushVersion)]
         [ActionName("PushPackageApi")]
+        // CodeQL [SM00433] This endpoint uses API Key authentication
         public virtual Task<ActionResult> CreatePackagePost()
         {
             return CreatePackageInternal();
@@ -512,11 +514,20 @@ namespace NuGetGallery
                     HttpStatusCode.RequestEntityTooLarge,
                     Strings.PackageFileTooLarge);
             }
+            catch (HttpException ex) when (!Response.IsClientConnected)
+            {
+                // ASP.NET throws HttpException when the client has disconnected during the upload.
+                TelemetryService.TrackSymbolPackagePushDisconnectEvent();
+                QuietLog.LogHandledException(ex);
+                return new HttpStatusCodeWithBodyResult(
+                    HttpStatusCode.BadRequest,
+                    Strings.PackageUploadCancelled);
+            }
             catch (Exception ex)
             {
                 ex.Log();
                 TelemetryService.TrackSymbolPackagePushFailureEvent(id, normalizedVersion);
-                throw ex;
+                throw;
             }
         }
 
@@ -542,12 +553,33 @@ namespace NuGetGallery
                 {
                     try
                     {
-                        if (ZipArchiveHelpers.FoundEntryInFuture(packageStream, out ZipArchiveEntry entryInTheFuture))
+                        InvalidZipEntry anyInvalidZipEntry = ZipArchiveHelpers.ValidateArchiveEntries(packageStream, out ZipArchiveEntry invalidZipEntry);
+
+                        switch (anyInvalidZipEntry)
                         {
-                            return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, string.Format(
-                                CultureInfo.CurrentCulture,
-                                Strings.PackageEntryFromTheFuture,
-                                entryInTheFuture.Name));
+                            case InvalidZipEntry.None:
+                                break;
+                            case InvalidZipEntry.InFuture:
+                                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, string.Format(
+                                    CultureInfo.CurrentCulture,
+                                    Strings.PackageEntryFromTheFuture,
+                                    invalidZipEntry.Name));
+                            case InvalidZipEntry.DoubleForwardSlashesInPath:
+                                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, string.Format(
+                                    CultureInfo.CurrentCulture,
+                                    Strings.PackageEntryWithDoubleForwardSlash,
+                                    invalidZipEntry.Name));
+                            case InvalidZipEntry.DoubleBackwardSlashesInPath:
+                                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, string.Format(
+                                    CultureInfo.CurrentCulture,
+                                    Strings.PackageEntryWithDoubleBackSlash,
+                                    invalidZipEntry.Name));
+                            default:
+                                // Generic error message for unknown invalid zip entry
+                                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, string.Format(
+                                    CultureInfo.CurrentCulture,
+                                    Strings.InvalidPackageEntry,
+                                    invalidZipEntry.Name));
                         }
                     }
                     catch (Exception ex)
@@ -645,11 +677,17 @@ namespace NuGetGallery
                                         string.Format(CultureInfo.CurrentCulture, Strings.PackageIsLocked, packageRegistration.Id));
                                 }
 
-                                var existingPackage = PackageService.FindPackageByIdAndVersionStrict(id, version.ToStringSafe());
-                                if (existingPackage != null)
+                                // A package can only be reuploaded if it never passed validation.
+                                var existingStatus = PackageService.GetPackageStatus(id, version);
+                                if (existingStatus != null)
                                 {
-                                    if (existingPackage.PackageStatusKey == PackageStatus.FailedValidation)
+                                    if (existingStatus == PackageStatus.FailedValidation)
                                     {
+                                        // Allow this new upload to replace the existing package.
+                                        // We avoided loading the full package entity until now as it is
+                                        // a relatively expensive operation and this path is uncommon.
+                                        var existingPackage = PackageService.FindPackageByIdAndVersionStrict(id, version.ToStringSafe());
+
                                         TelemetryService.TrackPackageReupload(existingPackage);
 
                                         await PackageDeleteService.HardDeletePackagesAsync(
@@ -811,6 +849,15 @@ namespace NuGetGallery
                     HttpStatusCode.RequestEntityTooLarge,
                     Strings.PackageFileTooLarge);
             }
+            catch (HttpException ex) when (!Response.IsClientConnected)
+            {
+                // ASP.NET throws HttpException when the client has disconnected during the upload.
+                TelemetryService.TrackPackagePushDisconnectEvent();
+                QuietLog.LogHandledException(ex);
+                return new HttpStatusCodeWithBodyResult(
+                    HttpStatusCode.BadRequest,
+                    Strings.PackageUploadCancelled);
+            }
             catch (Exception)
             {
                 TelemetryService.TrackPackagePushFailureEvent(id, version);
@@ -842,7 +889,7 @@ namespace NuGetGallery
         [ApiAuthorize]
         [ApiScopeRequired(NuGetScopes.PackageUnlist)]
         [ActionName("DeletePackageApi")]
-        public virtual async Task<ActionResult> DeletePackage(string id, string version)
+        public virtual async Task<ActionResult> DeletePackage(string id, string version, DeletePackageApiRequest request = null)
         {
             var package = PackageService.FindPackageByIdAndVersionStrict(id, version);
             if (package == null)
@@ -851,7 +898,8 @@ namespace NuGetGallery
                     HttpStatusCode.NotFound, string.Format(CultureInfo.CurrentCulture, Strings.PackageWithIdAndVersionNotFound, id, version));
             }
 
-            // Check if the current user's scopes allow listing/unlisting the current package ID
+            // Check if the current user's scopes allow listing/unlisting the current package ID. This scope is used for
+            // both unlisting and soft deletion.
             var apiScopeEvaluationResult = EvaluateApiScope(ActionsRequiringPermissions.UnlistOrRelistPackage, package.PackageRegistration, NuGetScopes.PackageUnlist);
             if (!apiScopeEvaluationResult.IsSuccessful())
             {
@@ -865,7 +913,55 @@ namespace NuGetGallery
                     string.Format(CultureInfo.CurrentCulture, Strings.PackageIsLocked, package.PackageRegistration.Id));
             }
 
-            await PackageUpdateService.MarkPackageUnlistedAsync(package);
+            var currentUser = GetCurrentUser();
+            DeletePackageAction action;
+            if (request?.Type == null)
+            {
+                action = DeletePackageAction.Unlist;
+            }
+            else if (!request.TryParseAction(out action))
+            {
+                return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, Strings.DeletePackage_InvalidDeleteType);
+            }
+
+            switch (action)
+            {
+                case DeletePackageAction.Unlist:
+                    await PackageUpdateService.MarkPackageUnlistedAsync(package);
+                    break;
+
+                case DeletePackageAction.SoftDelete:
+                    // A user can only delete packages if there are enabled in the flight and are NOT an admin. The
+                    // admin restriction is for safety reasons. This endpoint is currently intended just for test data
+                    // clean-up which can be done with a very limited, non-admin API key.
+                    if (!FeatureFlagService.IsDeletePackageApiEnabled(currentUser)
+                        || currentUser.IsAdministrator)
+                    {
+                        return new HttpStatusCodeWithBodyResult(HttpStatusCode.Forbidden, Strings.DeletePackage_NotAllowed);
+                    }
+
+                    // Apply a hard stop on the deletion if there are too many downloads on this package version. We
+                    // using configuration here and use a constant to mimize the risk of misconfiguration allowing too
+                    // many deletes.
+                    const int downloadCountLimit = 1000;
+                    if (package.DownloadCount >= downloadCountLimit)
+                    {
+                        return new HttpStatusCodeWithBodyResult(
+                            HttpStatusCode.Forbidden,
+                            string.Format(CultureInfo.CurrentCulture, Strings.DeletePackage_TooManyDownloads, downloadCountLimit));
+                    }
+
+                    await PackageDeleteService.SoftDeletePackagesAsync(
+                        new[] { package },
+                        currentUser,
+                        PackageDeleteApiReason,
+                        Strings.AutomatedPackageDeleteSignature);
+                    break;
+
+                default:
+                    throw new NotSupportedException($"The delete package action '{action}' is not supported.");
+            }
+            
             return new EmptyResult();
         }
 
@@ -873,6 +969,7 @@ namespace NuGetGallery
         [ApiAuthorize]
         [ApiScopeRequired(NuGetScopes.PackageUnlist)]
         [ActionName("PublishPackageApi")]
+        // CodeQL [SM00433] This endpoint uses API Key authentication
         public virtual async Task<ActionResult> PublishPackage(string id, string version)
         {
             var package = PackageService.FindPackageByIdAndVersionStrict(id, version);
@@ -902,6 +999,7 @@ namespace NuGetGallery
 
         [HttpPut]
         [ApiAuthorize]
+        [RequiresUserAgent]
         [ApiScopeRequired(NuGetScopes.PackageUnlist)]
         [ActionName(RouteName.DeprecatePackageApi)]
         public virtual async Task<ActionResult> DeprecatePackage(
@@ -912,7 +1010,8 @@ namespace NuGetGallery
             bool isOther = false, 
             string alternatePackageId = null, 
             string alternatePackageVersion = null, 
-            string message = null)
+            string message = null,
+            ListedVerb listedVerb = ListedVerb.Unchanged)
         {
             var registration = PackageService.FindPackageRegistrationById(id);
             if (registration == null)
@@ -937,12 +1036,14 @@ namespace NuGetGallery
                 apiScopeEvaluationResult.Owner,
                 id,
                 versions.ToList(),
+                isLegacy || hasCriticalBugs || isOther ? PackageDeprecatedVia.Api : PackageUndeprecatedVia.Api,
                 isLegacy,
                 hasCriticalBugs,
                 isOther,
                 alternatePackageId,
                 alternatePackageVersion,
-                message);
+                message,
+                listedVerb);
 
             if (error != null)
             {
@@ -1000,11 +1101,16 @@ namespace NuGetGallery
         public virtual async Task<ActionResult> GetPackageIds(
             string partialId,
             bool? includePrerelease,
+            bool? testData,
             string semVerLevel = null)
         {
             return new JsonResult
             {
-                Data = await _autocompletePackageIdsQuery.Execute(partialId, includePrerelease, semVerLevel),
+                Data = await _autocompletePackageIdsQuery.Execute(
+                    partialId,
+                    includePrerelease,
+                    testData,
+                    semVerLevel),
                 JsonRequestBehavior = JsonRequestBehavior.AllowGet
             };
         }
@@ -1014,11 +1120,16 @@ namespace NuGetGallery
         public virtual async Task<ActionResult> GetPackageVersions(
             string id,
             bool? includePrerelease,
+            bool? testData,
             string semVerLevel = null)
         {
             return new JsonResult
             {
-                Data = await _autocompletePackageVersionsQuery.Execute(id, includePrerelease, semVerLevel),
+                Data = await _autocompletePackageVersionsQuery.Execute(
+                    id,
+                    includePrerelease,
+                    testData,
+                    semVerLevel),
                 JsonRequestBehavior = JsonRequestBehavior.AllowGet
             };
         }
@@ -1109,9 +1220,25 @@ namespace NuGetGallery
                 TelemetryService.TrackPackagePushNamespaceConflictEvent(id, versionString, GetCurrentUser(), User.Identity);
                 return new HttpStatusCodeWithBodyResult(HttpStatusCode.Conflict, Strings.UploadPackage_IdNamespaceConflict);
             }
+            else if (result.PermissionsCheckResult == PermissionsCheckResult.OwnerlessReservedNamespaceFailure)
+            {
+                TelemetryService.TrackPackagePushOwnerlessNamespaceConflictEvent(id, versionString, GetCurrentUser(), User.Identity);
+                return new HttpStatusCodeWithBodyResult(HttpStatusCode.Conflict, Strings.UploadPackage_OwnerlessIdNamespaceConflict);
+            }
 
-            var message = result.PermissionsCheckResult == PermissionsCheckResult.Allowed && !result.IsOwnerConfirmed ?
-                Strings.ApiKeyOwnerUnconfirmed : Strings.ApiKeyNotAuthorized;
+            string message;
+            if (result.PermissionsCheckResult == PermissionsCheckResult.Allowed && !result.IsOwnerConfirmed)
+            {
+                message = Strings.ApiKeyOwnerUnconfirmed;
+            }
+            else if (result.PermissionsCheckResult == PermissionsCheckResult.Allowed && result.IsOwnerLocked)
+            {
+                return new HttpStatusCodeWithBodyResult(HttpStatusCode.Forbidden, Strings.ApiKeyOwnerLocked);
+            }
+            else
+            {
+                message = Strings.ApiKeyNotAuthorized;
+            }
 
             return new HttpStatusCodeWithBodyResult(statusCodeOnFailure, message);
         }
@@ -1163,3 +1290,4 @@ namespace NuGetGallery
         }
     }
 }
+#pragma warning restore CA3147 // No need to validate Antiforgery Token with API request

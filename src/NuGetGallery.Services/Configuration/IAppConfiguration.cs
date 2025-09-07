@@ -56,11 +56,6 @@ namespace NuGetGallery.Configuration
         string AzureStorage_Content_ConnectionString { get; set; }
 
         /// <summary>
-        /// The Azure Storage connection string used for Elmah error logs.
-        /// </summary>
-        string AzureStorage_Errors_ConnectionString { get; set; }
-
-        /// <summary>
         /// The Azure Storage connection string used for packages, after upload.
         /// </summary>
         string AzureStorage_Packages_ConnectionString { get; set; }
@@ -74,6 +69,11 @@ namespace NuGetGallery.Configuration
         /// The Azure Storage connection string used for statistics.
         /// </summary>
         string AzureStorage_Statistics_ConnectionString { get; set; }
+
+        /// <summary>
+        /// The Azure Storage connection string used for statistics. Secondary
+        /// </summary>
+        string AzureStorage_Statistics_ConnectionString_Alternate { get; set; }
 
         /// <summary>
         /// The Azure Storage connection string used for package uploads, before publishing.
@@ -91,9 +91,28 @@ namespace NuGetGallery.Configuration
         bool AzureStorageReadAccessGeoRedundant { get; set; }
 
         /// <summary>
+        /// Indicates whether Managed Service Identity should be used to access Azure Storage.
+        /// If false, the presumption is that connection strings contain the necessary credentials.
+        /// If true, single MSI is going to be used for all storage connections.
+        /// </summary>
+        bool AzureStorageUseMsi { get; set; }
+
+        /// <summary>
+        /// Client ID of the MSI to use for Azure storage access.
+        /// If empty or not specified, the default MSI will be used in Release builds
+        /// and <see cref="Azure.Identity.DefaultAzureCredential"/> in Debug builds.
+        /// </summary>
+        string AzureStorageMsiClientId { get; set; }
+
+        /// <summary>
         /// How frequently the feature flags should be refreshed.
         /// </summary>
         TimeSpan FeatureFlagsRefreshInterval { get; set; }
+
+        /// <summary>
+        /// Indicates whether Admin panel pages exist on this instance.
+        /// </summary>
+        bool AdminPanelEnabled { get; set; }
 
         /// <summary>
         /// Gets a boolean indicating whether DB admin through web UI should be accesible.
@@ -222,6 +241,11 @@ namespace NuGetGallery.Configuration
         string SiteRoot { get; set; }
 
         /// <summary>
+        /// Gets the protocol-independent support email site root
+        /// </summary>
+        string SupportEmailSiteRoot { get; set; }
+
+        /// <summary>
         /// Private key for verifying recaptcha user response.
         /// </summary>
         string ReCaptchaPrivateKey { get; set; }
@@ -249,9 +273,9 @@ namespace NuGetGallery.Configuration
         string EnforcedAuthProviderForAdmin { get; set; }
 
         /// <summary>
-        /// Gets a string indicating which AAD Tenant Id should be used for administrators. 
+        /// Gets a string indicating which Microsoft Entra tenant ID should be used for administrators. 
         /// When specified, the gallery will ensure admin users are logging in using only the specified tenant ID.
-        /// Blank means any AAD tenant ID can be used by administrators.
+        /// Blank means any Microsoft Entra tenant ID can be used by administrators.
         /// </summary>
         string EnforcedTenantIdForAdmin { get; set; }
 
@@ -457,12 +481,6 @@ namespace NuGetGallery.Configuration
         string DeploymentLabel { get; set; }
 
         /// <summary>
-        /// The Usabilla feedback button ID embedded in the JavaScript snippet obtained from Usabilla. The ID can found
-        /// in your button's JavaScript code. Look for "//w.usabilla.com/{button ID}.js".
-        /// </summary>
-        string UsabillaFeedbackButtonId { get; set; }
-
-        /// <summary>
         /// Allows to override the default (or externally configured) minWorkerThreads setting. Must be specified with <see cref="MinIoThreads"/>.
         /// This is a global (not per CPU core) limit.
         /// See more: 
@@ -497,5 +515,20 @@ namespace NuGetGallery.Configuration
         /// https://docs.microsoft.com/en-us/previous-versions/dotnet/netframework-4.0/7w2sway1(v=vs.100)?redirectedfrom=MSDN
         /// </summary>
         int? MaxIoThreads { get; set; }
+
+        /// <summary>
+        /// The username of the user that can be entered as the sender for admin flows. When an admin flow may send one
+        /// or more emails to end users, it helps to mask the identity of the site admin that performed the action by
+        /// using this user instead. This account is not created automatically. The username should refer to a user
+        /// account (not organization) that has an email address that can be visible for administrative notices. This
+        /// account should not have any credentials or be marked as a site admin.
+        /// </summary>
+        string AdminSenderUser { get; set; }
+
+        /// <summary>
+        /// The maximum size of JSON that can be returned by a JSON endpoint. This overrides the default 4 MB in
+        /// select places where large JSON response bodies are possible.
+        /// </summary>
+        int MaxJsonLengthOverride { get; set; }
     }
 }

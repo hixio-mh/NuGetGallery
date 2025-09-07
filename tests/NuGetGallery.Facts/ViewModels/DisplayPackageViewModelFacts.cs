@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -8,6 +8,9 @@ using Moq;
 using NuGet.Services.Entities;
 using NuGet.Versioning;
 using NuGetGallery.Framework;
+using NuGetGallery.Frameworks;
+using NuGetGallery.Services.Models;
+using NuGetGallery.TestData;
 using Xunit;
 using static NuGetGallery.DisplayPackageViewModel;
 
@@ -16,6 +19,73 @@ namespace NuGetGallery.ViewModels
     public class DisplayPackageViewModelFacts
     {
         private Random gen = new Random();
+
+        public class TheBlockSearchEngineIndexingProperty
+        {
+            [Fact]
+            public void DoesNotBlockListedAvailableOlderPackages()
+            {
+                Assert.False(Target.BlockSearchEngineIndexing);
+            }
+
+            [Fact]
+            public void BlocksUnlisted()
+            {
+                Target.Listed = false;
+
+                Assert.True(Target.BlockSearchEngineIndexing);
+            }
+
+            [Fact]
+            public void BlocksUnavailable()
+            {
+                Target.Available = false;
+
+                Assert.True(Target.BlockSearchEngineIndexing);
+            }
+
+            [Theory]
+            [MemberData(nameof(BlockSearchEngineIndexingData))]
+            public void BlocksNewSingleVersion(int days, bool expected)
+            {
+                Target.TotalDaysSinceCreated = days;
+
+                Assert.Equal(expected, Target.BlockSearchEngineIndexing);
+            }
+
+            [Fact]
+            public void DoesNotBlockRecentIfFeatureFlagIsOff()
+            {
+                Target.TotalDaysSinceCreated = 0;
+                Target.IsRecentPackagesNoIndexEnabled = false;
+
+                Assert.False(Target.BlockSearchEngineIndexing);
+            }
+
+            public TheBlockSearchEngineIndexingProperty()
+            {
+                Target = new DisplayPackageViewModel();
+                Target.Version = "1.0.0";
+                Target.Listed = true;
+                Target.Available = true;
+                Target.IsRecentPackagesNoIndexEnabled = true;
+                Target.TotalDaysSinceCreated = NumberOfDaysToBlockIndexing + 7;
+            }
+
+            public DisplayPackageViewModel Target { get; }
+
+            public static IEnumerable<object[]> BlockSearchEngineIndexingData
+            {
+                get
+                {
+                    for (int i = 0; i < NumberOfDaysToBlockIndexing + 5; i++)
+                    {
+                        yield return new object[] { i, i < NumberOfDaysToBlockIndexing };
+                    }
+                }
+            }
+
+        }
 
         private DateTime RandomDay()
         {
@@ -64,6 +134,30 @@ namespace NuGetGallery.ViewModels
         }
 
         [Theory]
+        [InlineData("https://github.com/dotnet/sqlclient", "git", "dotnet/SqlClient")]
+        [InlineData("https://github.com/jbogard/MediatR.git", "git", "jbogard/MediatR")]
+        [InlineData("git://github.com/AppMetrics/AppMetrics", null, "AppMetrics/AppMetrics")]
+        [InlineData("https://github.com/Azure/durabletask/", "git", "Azure/durabletask")]
+        [InlineData("https://visualstudio.com", "tfs", "")]
+        public void ItDeterminesComparableGitHubRepository(string repoUrl, string repoType, string ComparableGitHubRepository)
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                RepositoryUrl = repoUrl,
+                RepositoryType = repoType,
+                PackageRegistration = new PackageRegistration
+                {
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+            Assert.Equal(ComparableGitHubRepository, model.ComparableGitHubRepository, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [Theory]
         [InlineData(null, null)]
         [InlineData("", null)]
         [InlineData("not a url", null)]
@@ -104,6 +198,282 @@ namespace NuGetGallery.ViewModels
             Assert.Equal(expected, model.ProjectUrl);
         }
 
+        [Theory]
+        [InlineData("foo", "1.0.0", "https://nuget.info/packages/foo/1.0.0")]
+        [InlineData("foo", "1.1.0", "https://nuget.info/packages/foo/1.1.0")]
+        [InlineData("Foo.Bar", "1.1.0-bETa", "https://nuget.info/packages/Foo.Bar/1.1.0-bETa")]
+        public void ItInitializesNuGetPackageExplorerUrl(string packageId, string packageVersion, string expected)
+        {
+            var package = new Package
+            {
+                Version = packageVersion,
+                NormalizedVersion = packageVersion,
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = packageId,
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+            Assert.Equal(expected, model.NuGetPackageExplorerUrl);
+        }
+
+        [Theory]
+        [InlineData(false, "https://nuget.info/packages/foo/1.0.0", true)]
+        [InlineData(true, "", true)]
+        [InlineData(true, null, true)]
+        [InlineData(true, "https://nuget.info/packages/foo/1.0.0", false)]
+        public void CannotDisplayNuGetPackageExplorerLinkWhenInvalid(bool isEnabled, string url, bool isAvailable)
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            model.IsNuGetPackageExplorerLinkEnabled = isEnabled;
+            model.NuGetPackageExplorerUrl = url;
+            model.Available = isAvailable;
+
+            Assert.False(model.CanDisplayNuGetPackageExplorerLink());
+        }
+
+        [Fact]
+        public void CanDisplayNuGetPackageExplorerLinkWhenValid()
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            model.IsNuGetPackageExplorerLinkEnabled = true;
+            model.Available = true;
+
+            Assert.True(model.CanDisplayNuGetPackageExplorerLink());
+        }
+
+        [Theory]
+        [InlineData("foo", "1.0.0", "https://www.fuget.org/packages/foo/1.0.0")]
+        [InlineData("foo", "1.1.0", "https://www.fuget.org/packages/foo/1.1.0")]
+        [InlineData("Foo.Bar", "1.1.0-bETa", "https://www.fuget.org/packages/Foo.Bar/1.1.0-bETa")]
+        public void ItInitializesFuGetUrl(string packageId, string packageVersion, string expected)
+        {
+            var package = new Package
+            {
+                Version = packageVersion,
+                NormalizedVersion = packageVersion,
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = packageId,
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+            Assert.Equal(expected, model.FuGetUrl);
+        }
+
+        [Theory]
+        [InlineData(false, "https://www.fuget.org/packages/foo/1.0.0", true)]
+        [InlineData(true, "", true)]
+        [InlineData(true, null, true)]
+        [InlineData(true, "https://www.fuget.org/packages/foo/1.0.0", false)]
+        public void CannotDisplayFuGetLinkWhenInvalid(bool isEnabled, string url, bool isAvailable)
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            model.IsFuGetLinksEnabled = isEnabled;
+            model.FuGetUrl = url;
+            model.Available = isAvailable;
+
+            Assert.False(model.CanDisplayFuGetLink());
+        }
+
+        [Fact]
+        public void ItInitializesNuGetTrendsUrl()
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+            Assert.Equal("https://nugettrends.com/packages?ids=foo", model.NuGetTrendsUrl);
+        }
+
+        [Fact]
+        public void CanDisplayNuGetTrendsLinkWhenValid()
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            model.IsNuGetTrendsLinksEnabled = true;
+            model.Available = true;
+
+            Assert.True(model.CanDisplayNuGetTrendsLink());
+        }
+
+        [Theory]
+        [InlineData(false, "https://nugettrends.com/packages?ids=foo", true)]
+        [InlineData(true, "", true)]
+        [InlineData(true, null, true)]
+        [InlineData(true, "https://nugettrends.com/packages?ids=foo", false)]
+        public void CannotDisplayNuGetTrendsLinkWhenInvalid(bool isEnabled, string url, bool isAvailable)
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            model.IsNuGetTrendsLinksEnabled = isEnabled;
+            model.NuGetTrendsUrl = url;
+            model.Available = isAvailable;
+
+            Assert.False(model.CanDisplayNuGetTrendsLink());
+        }
+
+        [Theory]
+        [InlineData(true, true, true)]
+        [InlineData(false, true, true)]
+        [InlineData(true, false, true)]
+        [InlineData(true, true, false)]
+        [InlineData(false, false, true)]
+        [InlineData(false, true, false)]
+        [InlineData(false, false, false)]
+        public void CannotDisplayTargetFrameworksWhenInvalid(bool isEnabled, bool isDeleted, bool isTemplate)
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            model.IsDisplayTargetFrameworkEnabled = isEnabled;
+            model.Deleted = isDeleted;
+            model.IsDotnetNewTemplatePackageType = isTemplate;
+
+            Assert.False(model.CanDisplayTargetFrameworks());
+        }
+
+        [Fact]
+        public void CanDisplayTargetFrameworksWhenValid()
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Owners = Enumerable.Empty<User>().ToList(),
+                    Packages = Enumerable.Empty<Package>().ToList()
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            model.IsDisplayTargetFrameworkEnabled = true;
+            model.Deleted = false;
+            model.IsDotnetNewTemplatePackageType = false;
+
+            Assert.True(model.CanDisplayTargetFrameworks());
+        }
+
+        [Theory]
+        [InlineData(false, false, false, true)]
+        [InlineData(false, false, true, true)]
+        [InlineData(false, true, false, true)]
+        [InlineData(false, true, true, true)]
+        [InlineData(true, false, false, false)]
+        [InlineData(true, false, true, false)]
+        [InlineData(true, true, false, true)]
+        [InlineData(true, true, true, false)]
+        public void HidesDetailsAndLinksForCertainPackages(bool locked, bool listed, bool deleted, bool expected)
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                NormalizedVersion = "1.0.0",
+                Listed = listed,
+                PackageStatusKey = deleted ? PackageStatus.Deleted : PackageStatus.Available,
+                PackageRegistration = new PackageRegistration
+                {
+                    Id = "foo",
+                    Packages = Enumerable.Empty<Package>().ToList(),
+                    IsLocked = locked
+                }
+            };
+
+            var model = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+            Assert.Equal(expected, model.ShowDetailsAndLinks);
+        }
 
         [Theory]
         [InlineData(null, null)]
@@ -549,6 +919,58 @@ namespace NuGetGallery.ViewModels
             Assert.False(hasNewerRelease);
         }
 
+        [Fact]
+        public void HasEmbeddedReadmeFileTrueIfPackageHasEmbeddedReadme()
+        {
+            var package = new Package
+            {
+                Key = 123,
+                Version = "1.0.0",
+                HasReadMe = true,
+                EmbeddedReadmeType = EmbeddedReadmeFileType.Markdown,
+                PackageRegistration = new PackageRegistration
+                {
+                    Owners = Enumerable.Empty<User>().ToList(),
+                }
+            };
+
+            package.PackageRegistration.Packages = new[] { package };
+
+            var viewModel = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            //Act
+            var hasEmbeddedReadmeFile = viewModel.HasEmbeddedReadmeFile;
+
+            //Assert
+            Assert.True(hasEmbeddedReadmeFile);
+        }
+
+        [Fact]
+        public void HasEmbeddedReadmeFileFalseIfPackageHasLegacyReadme()
+        {
+            var package = new Package
+            {
+                Key = 123,
+                Version = "1.0.0",
+                HasReadMe = true,
+                EmbeddedReadmeType = EmbeddedReadmeFileType.Absent,
+                PackageRegistration = new PackageRegistration
+                {
+                    Owners = Enumerable.Empty<User>().ToList(),
+                }
+            };
+
+            package.PackageRegistration.Packages = new[] { package };
+
+            var viewModel = CreateDisplayPackageViewModel(package, currentUser: null, packageKeyToDeprecation: null, readmeHtml: null);
+
+            //Act
+            var hasEmbeddedReadmeFile = viewModel.HasEmbeddedReadmeFile;
+
+            //Assert
+            Assert.False(hasEmbeddedReadmeFile);
+        }
+
         private Package CreateTestPackage(string version, string dependencyVersion = null)
         {
             var package = new Package
@@ -750,6 +1172,38 @@ namespace NuGetGallery.ViewModels
             Assert.Null(versionModel.CustomMessage);
         }
 
+        [Fact]
+        public void VulnerabilitiesDisplayedInOrder()
+        {
+            var package = CreateTestPackage("1.0.0");
+
+            var packageKeyToVulnerabilities = new Dictionary<int, IReadOnlyList<PackageVulnerability>>
+            {
+                { package.Key, new List<PackageVulnerability>
+                    {
+                        new PackageVulnerability { Key = 1, Severity = PackageVulnerabilitySeverity.High },
+                        new PackageVulnerability { Key = 2, Severity = PackageVulnerabilitySeverity.Low },
+                        new PackageVulnerability { Key = 3, Severity = PackageVulnerabilitySeverity.Critical },
+                    }
+                }
+            };
+
+            // Act
+            var model = CreateDisplayPackageViewModel(
+                package,
+                currentUser: null,
+                packageKeyToVulnerabilities: packageKeyToVulnerabilities,
+                readmeHtml: null);
+
+            // Assert
+            var versionModel = model.PackageVersions.Single();
+            Assert.Null(versionModel.CustomMessage);
+            Assert.NotNull(model.Vulnerabilities);
+            Assert.Equal(PackageVulnerabilitySeverity.Critical, model.Vulnerabilities.ElementAt(0).Severity);
+            Assert.Equal(PackageVulnerabilitySeverity.High, model.Vulnerabilities.ElementAt(1).Severity);
+            Assert.Equal(PackageVulnerabilitySeverity.Low, model.Vulnerabilities.ElementAt(2).Severity);
+        }
+
         [Theory]
         [InlineData(true)]
         [InlineData(false)]
@@ -779,7 +1233,7 @@ namespace NuGetGallery.ViewModels
             }
             else
             {
-                Assert.Equal(null, model.RenamedMessage);
+                Assert.Null(model.RenamedMessage);
             }
         }
 
@@ -814,26 +1268,28 @@ namespace NuGetGallery.ViewModels
             }
 
             // Assert
-            Assert.Equal(null, model.PackageRenames);
-            Assert.Equal(null, model.RenamedMessage);
+            Assert.Null(model.PackageRenames);
+            Assert.Null(model.RenamedMessage);
         }
 
         private static DisplayPackageViewModel CreateDisplayPackageViewModel(
             Package package,
             User currentUser = null,
             Dictionary<int, PackageDeprecation> packageKeyToDeprecation = null,
+            Dictionary<int, IReadOnlyList<PackageVulnerability>> packageKeyToVulnerabilities = null,
             IReadOnlyList<PackageRename> packageRenames = null,
             string readmeHtml = null)
         {
             var allVersions = (IReadOnlyCollection<Package>)package.PackageRegistration.Packages;
 
-            return new DisplayPackageViewModelFactory(Mock.Of<IIconUrlProvider>()).Create(
+            return new DisplayPackageViewModelFactory(Mock.Of<IIconUrlProvider>(), Mock.Of<IPackageFrameworkCompatibilityFactory>(), Mock.Of<IFeatureFlagService>()).Create(
                 package,
                 allVersions,
                 currentUser: currentUser,
                 packageKeyToDeprecation: packageKeyToDeprecation,
+                packageKeyToVulnerabilities: packageKeyToVulnerabilities,
                 packageRenames: packageRenames,
-                readmeResult: new RenderedReadMeResult { Content = readmeHtml });
+                readmeResult: new RenderedMarkdownResult { Content = readmeHtml });
         }
     }
 }

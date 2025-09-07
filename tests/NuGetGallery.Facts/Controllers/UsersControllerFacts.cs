@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -12,9 +12,12 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Mvc;
+
 using Moq;
+
 using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
+
 using NuGetGallery.Areas.Admin;
 using NuGetGallery.Areas.Admin.Models;
 using NuGetGallery.Areas.Admin.ViewModels;
@@ -176,8 +179,8 @@ namespace NuGetGallery
                 var result = await controller.ChangeEmail(model);
 
                 // Assert
-                Assert.IsType<ViewResult>(result);
-                Assert.IsType<UserAccountViewModel>(((ViewResult)result).Model);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                Assert.IsType<UserAccountViewModel>(viewResult.Model);
             }
         }
 
@@ -251,6 +254,13 @@ namespace NuGetGallery
 
         public class TheForgotPasswordAction : TestContainer
         {
+            public TheForgotPasswordAction()
+            {
+                GetMock<IFeatureFlagService>()
+                    .Setup(s => s.IsNuGetAccountPasswordLoginEnabled())
+                    .Returns(true);
+            }
+
             [Fact]
             public async Task SendsEmailWithPasswordResetUrl()
             {
@@ -381,8 +391,53 @@ namespace NuGetGallery
                 catch (Exception e)
                 {
                     // Assert
-                    Assert.True(false, $"No exception should be thrown for result type {resultType}: {e}");
+                    Assert.Fail($"No exception should be thrown for result type {resultType}: {e}");
                 }
+            }
+
+            [Theory]
+            [InlineData(true)]
+            [InlineData(false)]
+            public void ModelIsPasswordLoginEnabledHasSameValueAsNuGetAccountPasswordLoginEnabled(bool flagEnabled)
+            {
+                GetMock<IFeatureFlagService>()
+                    .Setup(s => s.IsNuGetAccountPasswordLoginEnabled())
+                    .Returns(flagEnabled);
+                var controller = GetController<UsersController>();
+
+                var result = controller.ForgotPassword() as ViewResult;
+                var model = result.Model as ForgotPasswordViewModel;
+
+                Assert.NotNull(result);
+                Assert.IsNotType<RedirectResult>(result);
+                Assert.Equal(flagEnabled, model.IsPasswordLoginEnabled);
+            }
+
+            [Fact]
+            public async Task WhenNuGetAccountPasswordLoginEnabledShowsErrorOnPost()
+            {
+                var fakeEmail = "test@example.com";
+                GetMock<IFeatureFlagService>()
+                    .Setup(s => s.IsNuGetAccountPasswordLoginEnabled())
+                    .Returns(false);
+
+                var configMock = new Mock<ILoginDiscontinuationConfiguration>();
+                configMock
+                    .Setup(x => x.IsEmailInExceptionsList(fakeEmail))
+                    .Returns(false);
+                GetMock<IContentObjectService>()
+                    .Setup(x => x.LoginDiscontinuationConfiguration)
+                    .Returns(configMock.Object);
+
+                var controller = GetController<UsersController>();
+
+                var model = new ForgotPasswordViewModel { Email = fakeEmail };
+
+                var result = await controller.ForgotPassword(model) as ViewResult;
+
+                Assert.NotNull(result);
+                Assert.IsNotType<RedirectResult>(result);
+                Assert.Contains(Strings.ForgotPassword_Disabled_Error, result.ViewData.ModelState[string.Empty].Errors.Select(e => e.ErrorMessage));
             }
 
             public static IEnumerable<object[]> ResultTypes
@@ -494,11 +549,21 @@ namespace NuGetGallery
                 var result = await controller.ResetPassword("user", "token", new PasswordResetViewModel(), forgot);
 
                 Assert.NotNull(result);
-                Assert.IsType<ViewResult>(result);
-
-                var viewResult = result as ViewResult;
+                var viewResult = Assert.IsType<ViewResult>(result);
                 Assert.Equal(forgot, viewResult.ViewBag.ForgotPassword);
             }
+        }
+
+        public class TheDeleteAccountPostAction : TheDeleteAccountPostBaseAction
+        {
+            protected override User CreateUser(Fakes fakes, string username)
+            {
+                return fakes.CreateUser(username);
+            }
+        }
+
+        public class TheDeleteAccountAction : TheDeleteAccountBaseAction
+        {
         }
 
         public class TheConfirmAction : TheConfirmBaseAction
@@ -580,9 +645,7 @@ namespace NuGetGallery
                 var result = controller.ApiKeys();
 
                 // Assert
-                Assert.IsType<ViewResult>(result);
-                var viewResult = result as ViewResult;
-
+                var viewResult = Assert.IsType<ViewResult>(result);
                 Assert.IsType<ApiKeyListViewModel>(viewResult.Model);
                 return viewResult.Model as ApiKeyListViewModel;
             }
@@ -609,7 +672,27 @@ namespace NuGetGallery
 
                 // Assert
                 Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
-                Assert.True(string.Compare((string)result.Data, Strings.ApiKeyDescriptionRequired) == 0);
+                Assert.Equal(Strings.ApiKeyDescriptionRequired, (string)result.Data);
+            }
+
+            [Fact]
+            public async Task WhenUserIsLockedReturnsError()
+            {
+                // Arrange 
+                var user = new User { Username = "the-username", UserStatusKey = UserStatus.Locked };
+                var controller = GetController<UsersController>();
+                controller.SetCurrentUser(user);
+
+                // Act
+                var result = await controller.GenerateApiKey(
+                    description: "A pea eye key",
+                    owner: user.Username,
+                    scopes: null,
+                    expirationInDays: null);
+
+                // Assert
+                Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
+                Assert.Equal(ServicesStrings.UserAccountIsLocked, (string)result.Data);
             }
 
             public static IEnumerable<object[]> WhenScopeOwnerDoesNotMatch_ReturnsBadRequest_Data
@@ -657,7 +740,7 @@ namespace NuGetGallery
 
                 // Assert
                 Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
-                Assert.True(string.Compare((string)result.Data, Strings.ApiKeyScopesNotAllowed) == 0);
+                Assert.Equal(Strings.ApiKeyScopesNotAllowed, (string)result.Data);
             }
 
             public static IEnumerable<object[]> WhenScopeOwnerMatchesOrganizationWithPermission_ReturnsSuccess_Data
@@ -870,6 +953,58 @@ namespace NuGetGallery
                 Assert.NotNull(apiKey);
                 Assert.Equal(description, apiKey.Description);
                 Assert.Equal(expectedScopes.Length, apiKey.Scopes.Count);
+                Assert.False(apiKey.WasCreatedSecurely);
+
+                foreach (var expectedScope in expectedScopes)
+                {
+                    var actualScope =
+                        apiKey.Scopes.First(x => x.AllowedAction == expectedScope.AllowedAction &&
+                                                 x.Subject == expectedScope.Subject);
+                    Assert.NotNull(actualScope);
+                }
+            }
+
+            [MemberData(nameof(CreatesNewApiKeyCredential_Input))]
+            [Theory]
+            public async Task CreatesNewApiKeyCredentialSecurely(string description, string[] scopes, string[] subjects, Scope[] expectedScopes)
+            {
+                // Arrange 
+                var user = new User("the-username");
+                GetMock<IUserService>()
+                    .Setup(u => u.FindByUsername(user.Username, false))
+                    .Returns(user);
+
+                GetMock<AuthenticationService>()
+                   .Setup(u => u.AddCredential(
+                       It.IsAny<User>(),
+                       It.IsAny<Credential>()))
+                   .Callback<User, Credential>((u, c) =>
+                   {
+                       u.Credentials.Add(c);
+                       c.User = u;
+                   })
+                   .Completes()
+                   .Verifiable();
+
+                var controller = GetController<UsersController>();
+                controller.SetCurrentUser(user);
+                controller.OwinContext.AddClaim(NuGetClaims.WasMultiFactorAuthenticated);
+
+                // Act
+                await controller.GenerateApiKey(
+                    description: description,
+                    owner: user.Username,
+                    scopes: scopes,
+                    subjects: subjects,
+                    expirationInDays: null);
+
+                // Assert
+                var apiKey = user.Credentials.FirstOrDefault(x => x.Type == CredentialTypes.ApiKey.V4);
+
+                Assert.NotNull(apiKey);
+                Assert.Equal(description, apiKey.Description);
+                Assert.Equal(expectedScopes.Length, apiKey.Scopes.Count);
+                Assert.True(apiKey.WasCreatedSecurely);
 
                 foreach (var expectedScope in expectedScopes)
                 {
@@ -1223,7 +1358,7 @@ namespace NuGetGallery
                 User currentUser,
                 Package package)
             {
-                Assert.Equal(package.PackageStatusKey, PackageStatus.Available);
+                Assert.Equal(PackageStatus.Available, package.PackageStatusKey);
                 Assert.Equal(package.PackageRegistration.Id, packageModel.Id);
                 Assert.Equal(package.Version, packageModel.Version);
                 Assert.Equal(package.PackageRegistration.DownloadCount, packageModel.DownloadCount);
@@ -1469,7 +1604,7 @@ namespace NuGetGallery
                 await controller.ChangePassword(new UserAccountViewModel());
 
                 // Assert
-                Assert.Equal(TestUtility.GallerySiteRootHttps + "account/setpassword/test/t0k3n", actualConfirmUrl);
+                Assert.Equal(TestUtility.GallerySupportEmailSiteRootHttps + "account/setpassword/test/t0k3n", actualConfirmUrl);
                 GetMock<IMessageService>().VerifyAll();
             }
 
@@ -1532,6 +1667,41 @@ namespace NuGetGallery
                 Assert.Equal(enable2FA, ClaimsExtensions.HasBooleanClaim(identity, NuGetClaims.EnabledMultiFactorAuthentication));
                 ResultAssert.IsRedirectToRoute(result, new { action = "Account" });
             }
+
+            [Theory]
+            [InlineData(true, false)]
+            [InlineData(false, true)]
+            public async Task PreventsDisableOnLockedUser(bool enable2FA, bool fail)
+            {
+                // Arrange
+                var fakes = Get<Fakes>();
+                var user = fakes.CreateUser("user1");
+                user.UserStatusKey = UserStatus.Locked;
+                user.EnableMultiFactorAuthentication = !enable2FA;
+
+                var controller = GetController<UsersController>();
+                controller.SetCurrentUser(user);
+
+                var userServiceMock = GetMock<IUserService>();
+                userServiceMock
+                    .Setup(x => x.ChangeMultiFactorAuthentication(user, enable2FA, null))
+                    .Returns(Task.CompletedTask)
+                    .Verifiable();
+
+                // Act
+                var result = await controller.ChangeMultiFactorAuthentication(enable2FA);
+
+                // Assert
+                if (fail)
+                {
+                    ResultAssert.IsRedirectToRoute(result, new { action = "Account" });
+                    Assert.Equal(ServicesStrings.UserAccountIsLocked, controller.TempData["ErrorMessage"]);
+                }
+                else
+                {
+                    userServiceMock.Verify(x => x.ChangeMultiFactorAuthentication(user, enable2FA, It.IsAny<string>()));
+                }
+            }
         }
 
         public class TheRemovePasswordAction : TestContainer
@@ -1552,7 +1722,7 @@ namespace NuGetGallery
                 // Assert
                 ResultAssert.IsRedirectToRoute(result, new { action = "Account" });
                 Assert.Equal(Strings.CannotRemoveOnlyLoginCredential, controller.TempData["Message"]);
-                Assert.Equal(1, user.Credentials.Count);
+                Assert.Single(user.Credentials);
             }
 
             [Fact]
@@ -1571,7 +1741,7 @@ namespace NuGetGallery
                 // Assert
                 ResultAssert.IsRedirectToRoute(result, new { action = "Account" });
                 Assert.Equal(Strings.CredentialNotFound, controller.TempData["Message"]);
-                Assert.Equal(1, user.Credentials.Count);
+                Assert.Single(user.Credentials);
             }
 
             [Fact]
@@ -1635,7 +1805,7 @@ namespace NuGetGallery
                 // Assert
                 ResultAssert.IsRedirectToRoute(result, new { action = "Account" });
                 Assert.Equal(Strings.CannotRemoveOnlyLoginCredential, controller.TempData["Message"]);
-                Assert.Equal(1, user.Credentials.Count);
+                Assert.Single(user.Credentials);
             }
 
             [Fact]
@@ -1657,7 +1827,7 @@ namespace NuGetGallery
                 ResultAssert.IsRedirectToRoute(result, new { action = "Account" });
                 Assert.Equal(Strings.CredentialNotFound, controller.TempData["Message"]);
 
-                Assert.Equal(1, user.Credentials.Count);
+                Assert.Single(user.Credentials);
             }
 
             [Theory]
@@ -1681,9 +1851,9 @@ namespace NuGetGallery
                 // Assert
                 Assert.Equal((int)HttpStatusCode.NotFound, controller.Response.StatusCode);
                 Assert.IsType<JsonResult>(result);
-                Assert.True(string.Compare((string)((JsonResult)result).Data, Strings.CredentialNotFound) == 0);
+                Assert.Equal(Strings.CredentialNotFound, (string)((JsonResult)result).Data);
 
-                Assert.Equal(1, user.Credentials.Count);
+                Assert.Single(user.Credentials);
             }
 
             [Fact]
@@ -1783,7 +1953,7 @@ namespace NuGetGallery
                         },
                         new object[]
                         {
-                            new Scope[0]{ },
+                            Array.Empty<Scope>(),
                             Strings.NonScopedApiKeyDescription
                         }
                     };
@@ -1865,9 +2035,36 @@ namespace NuGetGallery
 
                 // Assert
                 Assert.Equal((int)HttpStatusCode.NotFound, controller.Response.StatusCode);
-                Assert.True(string.Compare((string)result.Data, Strings.CredentialNotFound) == 0);
+                Assert.Equal(Strings.CredentialNotFound, (string)result.Data);
 
-                Assert.Equal(1, user.Credentials.Count);
+                Assert.Single(user.Credentials);
+                Assert.True(user.Credentials.Contains(cred));
+            }
+
+            [Fact]
+            public async Task GivenLockedUser_ErrorIsReturnedWithNoChangesMade()
+            {
+                // Arrange
+                var fakes = Get<Fakes>();
+
+                var user = fakes.CreateUser("test",
+                    new CredentialBuilder().CreateApiKey(TimeSpan.FromHours(1), out string plaintextApiKey));
+                user.UserStatusKey = UserStatus.Locked;
+                var cred = user.Credentials.First();
+
+                var controller = GetController<UsersController>();
+                controller.SetCurrentUser(user);
+
+                // Act
+                var result = await controller.RegenerateCredential(
+                    credentialType: cred.Type,
+                    credentialKey: CredentialKey);
+
+                // Assert
+                Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
+                Assert.Equal(ServicesStrings.UserAccountIsLocked, (string)result.Data);
+
+                Assert.Single(user.Credentials);
                 Assert.True(user.Credentials.Contains(cred));
             }
 
@@ -1912,7 +2109,7 @@ namespace NuGetGallery
 
                 // Assert
                 Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
-                Assert.True(string.Compare((string)result.Data, Strings.Unsupported) == 0);
+                Assert.Equal(Strings.Unsupported, (string)result.Data);
             }
 
             public static IEnumerable<object[]> GivenValidRequest_ItGeneratesNewCredAndRemovesOldCredAndSendsNotificationToUser_Input
@@ -2019,6 +2216,78 @@ namespace NuGetGallery
             }
         }
 
+        public class TheRevokeApiKeyCredentialAction : TestContainer
+        {
+            [Fact]
+            public async Task GivenNoCredential_ErrorIsReturnedWithNoChangesMade()
+            {
+                // Arrange
+                var fakes = Get<Fakes>();
+
+                var user = fakes.CreateUser("test",
+                    new CredentialBuilder().CreateApiKey(TimeSpan.FromHours(1), out string plaintextApiKey));
+                var cred = user.Credentials.First();
+
+                var controller = GetController<UsersController>();
+                controller.SetCurrentUser(user);
+
+                // Act
+                var result = await controller.RevokeApiKeyCredential(
+                    credentialType: cred.Type,
+                    credentialKey: CredentialKey);
+
+                // Assert
+                Assert.Equal((int)HttpStatusCode.NotFound, controller.Response.StatusCode);
+                Assert.Equal(Strings.CredentialNotFound, (string)result.Data);
+                Assert.Single(user.Credentials);
+                Assert.Equal(cred.Expires, user.Credentials.First().Expires);
+            }
+
+            [Fact]
+            public async Task GivenValidRequest_ItRevokesCredential()
+            {
+                // Arrange
+                var fakes = Get<Fakes>();
+
+                var user = fakes.CreateUser("test",
+                    new CredentialBuilder().CreateApiKey(TimeSpan.FromHours(1), out string plaintextApiKey));
+                var cred = user.Credentials.First();
+
+                var authenticationService = GetMock<AuthenticationService>();
+
+                authenticationService.Setup(x => x.RevokeApiKeyCredential(It.IsAny<Credential>(), It.IsAny<CredentialRevocationSource>(), It.IsAny<bool>()))
+                    .Returns(Task.FromResult(0));
+
+                authenticationService.Setup(x => x.DescribeCredential(It.IsAny<Credential>()))
+                    .Returns(GetRevokedApiKeyCredentialViewModel(cred.Type));
+
+                var controller = GetController<UsersController>();
+                controller.SetCurrentUser(user);
+
+                // Act
+                var result = await controller.RevokeApiKeyCredential(cred.Type, cred.Key);
+
+                // Assert
+                Assert.IsType<JsonResult>(result);
+                var credentialViewModel = Assert.IsType<ApiKeyViewModel>(result.Data);
+                Assert.True(credentialViewModel.HasExpired);
+
+                authenticationService.Verify(x => x.RevokeApiKeyCredential(It.IsAny<Credential>(), It.IsAny<CredentialRevocationSource>(), It.IsAny<bool>()), Times.Once);
+                authenticationService.Verify(x => x.DescribeCredential(It.IsAny<Credential>()), Times.Once);
+            }
+
+            private static CredentialViewModel GetRevokedApiKeyCredentialViewModel(string apiKeyType)
+            {
+                return new CredentialViewModel
+                {
+                    Type = apiKeyType,
+                    RevocationSource = CredentialRevocationSource.User.ToString(),
+                    HasExpired = true,
+                    Scopes = new List<ScopeViewModel>(),
+                };
+            }
+        }
+
         public class TheEditCredentialAction : TestContainer
         {
             public static IEnumerable<object[]> GivenANonApiKeyV2Credential_ReturnsUnsupported_Input
@@ -2063,7 +2332,7 @@ namespace NuGetGallery
 
                 // Assert
                 Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
-                Assert.True(string.CompareOrdinal((string)result.Data, Strings.Unsupported) == 0);
+                Assert.Equal(Strings.Unsupported, (string)result.Data);
             }
 
             [Fact]
@@ -2091,7 +2360,7 @@ namespace NuGetGallery
 
                 // Assert
                 Assert.Equal((int)HttpStatusCode.NotFound, controller.Response.StatusCode);
-                Assert.True(String.CompareOrdinal((string)result.Data, Strings.CredentialNotFound) == 0);
+                Assert.Equal(Strings.CredentialNotFound, (string)result.Data);
 
                 authenticationService.Verify(x => x.EditCredentialScopes(It.IsAny<User>(), It.IsAny<Credential>(), It.IsAny<ICollection<Scope>>()), Times.Never);
             }
@@ -2128,7 +2397,7 @@ namespace NuGetGallery
                             new [] { "abc", "def" },
                             new []
                             {
-                               new Scope("abc", NuGetScopes.PackageUnlist),
+                                new Scope("abc", NuGetScopes.PackageUnlist),
                                 new Scope("abc", NuGetScopes.PackagePush),
                                 new Scope("def", NuGetScopes.PackageUnlist),
                                 new Scope("def", NuGetScopes.PackagePush)
@@ -2203,7 +2472,7 @@ namespace NuGetGallery
 
                 foreach (var expectedScope in expectedScopes)
                 {
-                    var expectedAction = NuGetScopes.Describe(expectedScope.AllowedAction);
+                    var expectedAction = NuGetScopes.Describe(expectedScope.AllowedAction, isDeprecateApiEnabled: false);
                     var actualScope = viewModel.Scopes.First(x => x == expectedAction);
                     Assert.NotNull(actualScope);
                 }
@@ -3359,6 +3628,16 @@ namespace NuGetGallery
 
                 _certificateService.VerifyAll();
             }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    // Dispose managed resources
+                    _controller?.Dispose();
+                    base.Dispose(disposing);
+                }
+            }
         }
 
         public class TheGetCertificatesAction : TestContainer
@@ -3433,6 +3712,16 @@ namespace NuGetGallery
                 Assert.Equal((int)HttpStatusCode.OK, _controller.Response.StatusCode);
 
                 _certificateService.VerifyAll();
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    // Dispose managed resources
+                    _controller?.Dispose();
+                    base.Dispose(disposing);
+                }
             }
         }
 
@@ -3565,6 +3854,16 @@ namespace NuGetGallery
 
                 return new StubHttpPostedFile((int)stream.Length, "certificate.cer", stream);
             }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    // Dispose managed resources
+                    _controller?.Dispose();
+                    base.Dispose(disposing);
+                }
+            }
         }
 
         public class TheDeleteCertificateAction : TestContainer
@@ -3638,6 +3937,16 @@ namespace NuGetGallery
                 Assert.NotNull(response);
                 Assert.Equal((int)HttpStatusCode.OK, _controller.Response.StatusCode);
             }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    // Dispose managed resources
+                    _controller?.Dispose();
+                    base.Dispose(disposing);
+                }
+            }
         }
 
         public class TheDeleteUserAccountAction : TestContainer
@@ -3704,47 +4013,160 @@ namespace NuGetGallery
 
         public class ThePackagesAction : TestContainer
         {
+            private UsersController _testController;
+            private User _testUser;
+            private string userName = "RegularUser";
+            private Fakes _fakes;
+
+            public ThePackagesAction()
+            {
+                _testController = GetController<UsersController>();
+                _fakes = Get<Fakes>();
+                _testUser = _fakes.CreateUser(userName);
+                _testUser.IsDeleted = false;
+                _testUser.Key = 1;
+                _testController.SetCurrentUser(_testUser);
+            }
+
+            private PackageRegistration CreatePackageRegistration(string Id, int Key, string Version, string Description)
+            {
+                var packageRegistration = new PackageRegistration();
+                packageRegistration.Id = Id;
+                packageRegistration.Owners.Add(_testUser);
+
+                var userPackage1 = new Package
+                {
+                    Key = Key,
+                    Version = Version,
+                    PackageRegistration = packageRegistration,
+                    Description = Description
+                };
+                packageRegistration.Packages.Add(userPackage1);
+                return packageRegistration;
+            }
+
+            [Fact]
+            public void PackagesAreSortedById()
+            {
+                PackageRegistration packageRegistration1 = CreatePackageRegistration("Company.ZebraPackage", 1, "1.0.0", "last");
+                PackageRegistration packageRegistration2 = CreatePackageRegistration("Company.AlphaPackage", 1, "1.0.0", "first");
+                PackageRegistration packageRegistration3 = CreatePackageRegistration("Company.NormalPackage", 1, "1.0.0", "middle");
+
+                var userPackages = new List<Package> {
+                    packageRegistration1.Packages.First(),
+                    packageRegistration2.Packages.First(),
+                    packageRegistration3.Packages.First()
+                };
+
+                GetMock<IUserService>()
+                    .Setup(stub => stub.FindByUsername(userName, false))
+                    .Returns(_testUser);
+
+                GetMock<IPackageService>()
+                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(_testUser, It.IsAny<bool>(), false))
+                    .Returns(userPackages);
+
+                var model = ResultAssert.IsView<ManagePackagesViewModel>(_testController.Packages());
+
+                Assert.Equal("Company.AlphaPackage", model.ListedPackages.ToArray()[0].Id);
+                Assert.Equal("Company.NormalPackage", model.ListedPackages.ToArray()[1].Id);
+                Assert.Equal("Company.ZebraPackage", model.ListedPackages.ToArray()[2].Id);
+            }
+
+            [Fact]
+            public void PackagesVersionSortOrderIsSetBySemVer()
+            {
+                PackageRegistration packageRegistration1 = CreatePackageRegistration("Company.ZebraPackage", 1, "1.0.0", "middle");
+                PackageRegistration packageRegistration2 = CreatePackageRegistration("Company.NormalPackage", 1, "0.0.1", "first");
+                PackageRegistration packageRegistration3 = CreatePackageRegistration("Company.AlphaPackage", 1, "1.1.0", "last");
+
+                var userPackages = new List<Package> {
+                    packageRegistration1.Packages.First(),
+                    packageRegistration2.Packages.First(),
+                    packageRegistration3.Packages.First()
+                };
+
+                GetMock<IUserService>()
+                    .Setup(stub => stub.FindByUsername(userName, false))
+                    .Returns(_testUser);
+
+                GetMock<IPackageService>()
+                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(_testUser, It.IsAny<bool>(), false))
+                    .Returns(userPackages);
+
+                var model = ResultAssert.IsView<ManagePackagesViewModel>(_testController.Packages());
+
+                // The "VersionSortOrder" should be set according to Semantic Version sort order, not package Id
+                Assert.Equal(0, model.ListedPackages.First(x => x.Version == "0.0.1").VersionSortOrder);
+                Assert.Equal(1, model.ListedPackages.First(x => x.Version == "1.0.0").VersionSortOrder);
+                Assert.Equal(2, model.ListedPackages.First(x => x.Version == "1.1.0").VersionSortOrder);
+            }
+
             [Fact]
             public void UsesProperIconUrl()
             {
-                string userName = "RegularUser";
-                var controller = GetController<UsersController>();
-                var fakes = Get<Fakes>();
-                var testUser = fakes.CreateUser(userName);
-                testUser.IsDeleted = false;
-                testUser.Key = 1;
-                controller.SetCurrentUser(testUser);
-
-                var packageRegistration = new PackageRegistration();
-                packageRegistration.Owners.Add(testUser);
-
-                var userPackage = new Package()
-                {
-                    Description = "TestPackage",
-                    Key = 1,
-                    Version = "1.0.0",
-                    PackageRegistration = packageRegistration,
-                };
-                packageRegistration.Packages.Add(userPackage);
-
+                PackageRegistration packageRegistration1 = CreatePackageRegistration("TestPackage", 1, "1.0.0", "TestPackage");
+                Package userPackage = packageRegistration1.Packages.First();
                 var userPackages = new List<Package>() { userPackage };
 
                 const string iconUrl = "https://some.test/icon";
+
                 GetMock<IIconUrlProvider>()
                     .Setup(iup => iup.GetIconUrlString(It.IsAny<Package>()))
                     .Returns(iconUrl);
                 GetMock<IUserService>()
                     .Setup(stub => stub.FindByUsername(userName, false))
-                    .Returns(testUser);
+                    .Returns(_testUser);
                 GetMock<IPackageService>()
-                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(testUser, It.IsAny<bool>(), false))
+                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(_testUser, It.IsAny<bool>(), false))
                     .Returns(userPackages);
 
-                var model = ResultAssert.IsView<ManagePackagesViewModel>(controller.Packages());
+                var model = ResultAssert.IsView<ManagePackagesViewModel>(_testController.Packages());
 
                 GetMock<IIconUrlProvider>()
                     .Verify(iup => iup.GetIconUrlString(userPackage), Times.AtLeastOnce);
                 Assert.Equal(iconUrl, model.ListedPackages.Single().IconUrl);
+            }
+
+            [Fact]
+            public void AssessesVulnerabilities()
+            {
+                PackageRegistration zebraRegistration = CreatePackageRegistration("Company.ZebraPackage", 1, "1.0.0", "test zebra vulnerable");
+                PackageRegistration alphaRegistration = CreatePackageRegistration("Company.AlphaPackage", 1, "1.1.1", "test alpha clean");
+                var versionRange = new VulnerablePackageVersionRange
+                {
+                    PackageVersionRange = "1.0.0"
+                };
+                var zebraPackage = zebraRegistration.Packages.First();
+                var alphaPackage = alphaRegistration.Packages.First();
+                zebraPackage.VulnerablePackageRanges = new List<VulnerablePackageVersionRange> { versionRange };
+                versionRange.Vulnerability = new PackageVulnerability();
+                var latestPackages = new List<Package> { zebraPackage, alphaPackage };
+
+                GetMock<IUserService>()
+                    .Setup(stub => stub.FindByUsername(userName, false))
+                    .Returns(_testUser);
+                GetMock<IPackageVulnerabilitiesService>()
+                    .Setup(stub => stub.IsPackageVulnerable(It.IsAny<Package>()))
+                    .Returns<Package>(package => (package?.Id ?? "") == "Company.ZebraPackage"); // this is the vulnerable package - true if this
+                GetMock<IPackageService>()
+                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(_testUser, It.IsAny<bool>(), false))
+                    .Returns(latestPackages);
+
+                var model = ResultAssert.IsView<ManagePackagesViewModel>(_testController.Packages());
+
+                Assert.False(model.ListedPackages.ToArray()[0].IsVulnerable);  // alpha
+                Assert.True(model.ListedPackages.ToArray()[1].IsVulnerable);   // zebra
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    // Dispose managed resources
+                    _testController?.Dispose();
+                    base.Dispose(disposing);
+                }
             }
         }
 

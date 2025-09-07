@@ -16,7 +16,11 @@ namespace NuGetGallery
 
         void TrackGetPackageRegistrationDownloadCountFailed(string packageId);
 
-        void TrackDownloadJsonRefreshDuration(long milliseconds);
+        void TrackDownloadJsonRefreshDuration(TimeSpan duration);
+
+        void TrackDownloadJsonTotalPackageIds(int totalPackageIds);
+
+        void TrackDownloadJsonTotalPackageVersions(int totalPackageVersions);
 
         void TrackDownloadCountDecreasedDuringRefresh(string packageId, string packageVersion, long oldCount, long newCount);
 
@@ -32,9 +36,13 @@ namespace NuGetGallery
 
         void TrackPackagePushFailureEvent(string id, NuGetVersion version);
 
+        void TrackPackagePushDisconnectEvent();
+
         void TrackPackageUnlisted(Package package);
 
         void TrackPackageListed(Package package);
+
+        void TrackPackagesUpdateListed(IReadOnlyList<Package> packages, bool listed);
 
         void TrackPackageDelete(Package package, bool isHardDelete);
 
@@ -51,13 +59,16 @@ namespace NuGetGallery
             PackageDeprecationStatus status,
             PackageRegistration alternateRegistration,
             Package alternatePackage,
-            bool hasCustomMessage);
+            bool hasCustomMessage,
+            bool hasChanges);
 
         void TrackPackageReadMeChangeEvent(Package package, string readMeSourceType, PackageEditReadMeState readMeState);
 
         void TrackCreatePackageVerificationKeyEvent(string packageId, string packageVersion, User user, IIdentity identity);
 
         void TrackPackagePushNamespaceConflictEvent(string packageId, string packageVersion, User user, IIdentity identity);
+
+        void TrackPackagePushOwnerlessNamespaceConflictEvent(string packageId, string packageVersion, User user, IIdentity identity);
 
         void TrackVerifyPackageKeyEvent(string packageId, string packageVersion, User user, IIdentity identity, int statusCode);
 
@@ -201,6 +212,11 @@ namespace NuGetGallery
         /// <param name="packageId">The id of the package that has the symbols uploaded.</param>
         /// <param name="packageVersion">The version of the package that has the symbols uploaded.</param>
         void TrackSymbolPackagePushFailureEvent(string packageId, string packageVersion);
+
+        /// <summary>
+        /// A telemetry event emitted when a symbol package push failed due to client disconnect.
+        /// </summary>
+        void TrackSymbolPackagePushDisconnectEvent();
 
         /// <summary>
         /// A telemetry event emitted when a symbol package fails Gallery validation.
@@ -371,11 +387,13 @@ namespace NuGetGallery
         /// <summary>
         /// Track when an A/B test enrollment is upgraded
         /// </summary>
-        /// <param name="schemaVersion">The schema version.</param>
+        /// <param name="oldSchemaVersion">The old schema version.</param>
+        /// <param name="newSchemaVersion">The new schema version.</param>
         /// <param name="previewSearchBucket">The bucket for the preview search test.</param>
         /// <param name="packageDependentBucket">The bucket for the package dependents test</param>
         void TrackABTestEnrollmentUpgraded(
-            int schemaVersion,
+            int oldSchemaVersion,
+            int newSchemaVersion,
             int previewSearchBucket,
             int packageDependentBucket);
 
@@ -393,5 +411,26 @@ namespace NuGetGallery
             bool isAuthenticated,
             int testBucket,
             int testPercentage);
+
+        /// <summary>
+        /// Track how long it takes to populate the vulnerabilities cache
+        /// </summary>
+        /// <param name="duration">Refresh duration for vulnerabilities cache</param>
+        void TrackVulnerabilitiesCacheRefreshDuration(TimeSpan duration);
+
+        /// <summary>
+        /// Tracks the current process uptime.
+        /// </summary>
+        /// <param name="uptime">The uptime to report.</param>
+        void TrackInstanceUptime(TimeSpan uptime);
+
+        /// <summary>
+        /// Tracks API request count by endpoint.
+        /// </summary>
+        /// <param name="endpoint"></param>
+        void TrackApiRequest(string endpoint);
+
+        IDisposable TrackSyncSqlConnectionCreationDuration();
+        IDisposable TrackAsyncSqlConnectionCreationDuration();
     }
 }

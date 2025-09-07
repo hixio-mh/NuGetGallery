@@ -44,7 +44,9 @@ namespace NuGet.Services.DatabaseMigration.Facts
                 await sqlConnection.OpenAsync();
                 using (var sqlCommand = sqlConnection.CreateCommand())
                 {
+#pragma warning disable CA2100 // Review SQL queries for security vulnerabilities
                     sqlCommand.CommandText = $"ALTER DATABASE {_dbName} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {_dbName};";
+#pragma warning restore CA2100 // Review SQL queries for security vulnerabilities
                     await sqlCommand.ExecuteNonQueryAsync();
                 }
             }

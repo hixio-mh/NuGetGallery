@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -7,6 +7,7 @@ using System.Data.Common;
 using System.Data.Entity;
 using System.Data.Entity.Infrastructure;
 using System.Data.Entity.Infrastructure.Annotations;
+using System.Threading;
 using System.Threading.Tasks;
 using NuGet.Services.Entities;
 
@@ -14,9 +15,9 @@ namespace NuGetGallery
 {
     /// <summary>
     /// This GalleryDbContextFactory is provided for running migrations in a flexible way as follows:
-    /// 1. Run migration using DbConnection; (For DatabaseMigrationTools with AAD token)
+    /// 1. Run migration using DbConnection; (For DatabaseMigrationTools with Microsoft Entra ID token)
     /// 2. Run migration using connection string;
-    /// 3. Run migration using default connection string ("Gallery.SqlServer") in a web.config; (For command-line migration with integrated AAD/username+password)
+    /// 3. Run migration using default connection string ("Gallery.SqlServer") in a web.config; (For command-line migration with integrated Microsoft Entra ID/username+password)
     /// </summary>
     public class GalleryDbContextFactory : IDbContextFactory<EntitiesContext>
     {
@@ -56,11 +57,23 @@ namespace NuGetGallery
            ReadOnly = readOnly;
         }
 
+        public IDisposable WithQueryHint(string queryHint)
+        {
+            if (QueryHint != null)
+            {
+                throw new InvalidOperationException("A query hint is already applied.");
+            }
+
+            return new QueryHintScope(this, queryHint);
+        }
+
         public bool ReadOnly { get; private set; }
+        public string QueryHint { get; private set; }
         public DbSet<Package> Packages { get; set; }
         public DbSet<PackageDeprecation> Deprecations { get; set; }
         public DbSet<PackageRegistration> PackageRegistrations { get; set; }
         public DbSet<PackageDependency> PackageDependencies { get; set; }
+        public DbSet<PackageFramework> PackageFrameworks { get; set; }
         public DbSet<Credential> Credentials { get; set; }
         public DbSet<Scope> Scopes { get; set; }
         public DbSet<UserSecurityPolicy> UserSecurityPolicies { get; set; }
@@ -71,25 +84,45 @@ namespace NuGetGallery
         public DbSet<PackageVulnerability> Vulnerabilities { get; set; }
         public DbSet<VulnerablePackageVersionRange> VulnerableRanges { get; set; }
         public DbSet<PackageRename> PackageRenames { get; set; }
+        public DbSet<FederatedCredentialPolicy> FederatedCredentialPolicies { get; set; }
+        public DbSet<FederatedCredential> FederatedCredentials { get; set; }
 
         /// <summary>
         /// User or organization accounts.
         /// </summary>
         public DbSet<User> Users { get; set; }
 
+        public bool HasChanges => ChangeTracker.HasChanges();
+
         DbSet<T> IReadOnlyEntitiesContext.Set<T>()
         {
             return base.Set<T>();
         }
 
+        public override int SaveChanges()
+        {
+            ThrowIfReadOnly();
+            return base.SaveChanges();
+        }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken)
+        {
+            ThrowIfReadOnly();
+            return base.SaveChangesAsync(cancellationToken);
+        }
+
         public override async Task<int> SaveChangesAsync()
+        {
+            ThrowIfReadOnly();
+            return await base.SaveChangesAsync();
+        }
+
+        private void ThrowIfReadOnly()
         {
             if (ReadOnly)
             {
                 throw new ReadOnlyModeException("Save changes unavailable: the gallery is currently in read only mode, with limited service. Please try again later.");
             }
-
-            return await base.SaveChangesAsync();
         }
 
         public void DeleteOnCommit<T>(T entity) where T : class
@@ -398,6 +431,24 @@ namespace NuGetGallery
             modelBuilder.Entity<UserCertificate>()
                 .HasKey(uc => uc.Key);
 
+            modelBuilder.Entity<UserCertificate>()
+                .Property(uc => uc.CertificateKey)
+                .HasColumnAnnotation(
+                    IndexAnnotation.AnnotationName,
+                    new IndexAnnotation(new IndexAttribute("IX_UserCertificates_CertificateKeyUserKey", order: 0)
+                    {
+                        IsUnique = true,
+                    }));
+
+            modelBuilder.Entity<UserCertificate>()
+                .Property(uc => uc.UserKey)
+                .HasColumnAnnotation(
+                    IndexAnnotation.AnnotationName,
+                    new IndexAnnotation(new IndexAttribute("IX_UserCertificates_CertificateKeyUserKey", order: 1)
+                    {
+                        IsUnique = true,
+                    }));
+
             modelBuilder.Entity<User>()
                 .HasMany(u => u.UserCertificates)
                 .WithRequired(uc => uc.User)
@@ -454,6 +505,14 @@ namespace NuGetGallery
                 .HasForeignKey(d => d.DeprecatedByUserKey)
                 .WillCascadeOnDelete(false);
 
+            modelBuilder.Entity<PackageDeprecation>()
+                .Property(pd => pd.PackageKey)
+                .HasColumnAnnotation(IndexAnnotation.AnnotationName, new IndexAnnotation(new IndexAttribute() { IsUnique = true }));
+
+            modelBuilder.Entity<PackageDeprecation>()
+                .Property(pd => pd.DeprecatedOn)
+                .HasDatabaseGeneratedOption(DatabaseGeneratedOption.Computed);
+
             modelBuilder.Entity<PackageVulnerability>()
                 .HasKey(v => v.Key)
                 .HasMany(v => v.AffectedRanges)
@@ -471,7 +530,7 @@ namespace NuGetGallery
             modelBuilder.Entity<VulnerablePackageVersionRange>()
                 .HasKey(pv => pv.Key)
                 .HasMany(pv => pv.Packages)
-                .WithMany(p => p.Vulnerabilities);
+                .WithMany(p => p.VulnerablePackageRanges);
 
             modelBuilder.Entity<VulnerablePackageVersionRange>()
                 .HasIndex(pv => pv.PackageId);
@@ -501,7 +560,72 @@ namespace NuGetGallery
                 .WithMany()
                 .HasForeignKey(r => r.ToPackageRegistrationKey)
                 .WillCascadeOnDelete(false);
+
+            modelBuilder.Entity<FederatedCredentialPolicy>()
+                .HasKey(x => x.Key);
+
+            modelBuilder.Entity<FederatedCredentialPolicy>()
+                .Property(x => x.Created)
+                .HasColumnType("datetime2");
+
+            modelBuilder.Entity<FederatedCredentialPolicy>()
+                .Property(x => x.LastMatched)
+                .IsOptional()
+                .HasColumnType("datetime2");
+
+            modelBuilder.Entity<FederatedCredentialPolicy>()
+                .HasRequired(x => x.CreatedBy)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedByUserKey)
+                .WillCascadeOnDelete(false); // users are only soft deleted today
+
+            modelBuilder.Entity<FederatedCredentialPolicy>()
+                .HasRequired(x => x.PackageOwner)
+                .WithMany()
+                .HasForeignKey(x => x.PackageOwnerUserKey)
+                .WillCascadeOnDelete(false); // users are only soft deleted today
+
+            modelBuilder.Entity<FederatedCredentialPolicy>()
+                .HasMany(x => x.Credentials)
+                .WithOptional(c => c.FederatedCredentialPolicy)
+                .WillCascadeOnDelete(false); // deletion must be done explicitly to improve per-credential auditing
+
+            modelBuilder.Entity<FederatedCredential>()
+                .HasKey(x => x.Key);
+
+            modelBuilder.Entity<FederatedCredential>()
+                .Property(x => x.Created)
+                .HasColumnType("datetime2");
+
+            modelBuilder.Entity<FederatedCredential>()
+                .Property(x => x.Expires)
+                .IsOptional()
+                .HasColumnType("datetime2");
+
+            modelBuilder.Entity<FederatedCredential>()
+                .HasIndex(x => x.Identity)
+                .IsUnique();
+
+            modelBuilder.Entity<FederatedCredential>()
+                .HasIndex(x => x.FederatedCredentialPolicyKey);
         }
+
 #pragma warning restore 618
+
+        private class QueryHintScope : IDisposable
+        {
+            private readonly EntitiesContext _entitiesContext;
+
+            public QueryHintScope(EntitiesContext entitiesContext, string queryHint)
+            {
+                _entitiesContext = entitiesContext ?? throw new ArgumentNullException(nameof(entitiesContext));
+                _entitiesContext.QueryHint = queryHint;
+            }
+
+            public void Dispose()
+            {
+                _entitiesContext.QueryHint = null;
+            }
+        }
     }
 }

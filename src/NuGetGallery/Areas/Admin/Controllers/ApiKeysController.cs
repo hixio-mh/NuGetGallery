@@ -53,7 +53,7 @@ namespace NuGetGallery.Areas.Admin.Controllers
                 return Json(HttpStatusCode.BadRequest, "Invalid empty input!");
             }
 
-            var queries = verifyQuery.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(q => q.Trim()).ToList();
+            var queries = verifyQuery.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(q => q.Trim());
 
             var results = new List<ApiKeyRevokeViewModel>();
             var verifiedApiKey = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -130,8 +130,8 @@ namespace NuGetGallery.Areas.Admin.Controllers
                         credential: apiKeyCredential,
                         leakedUrl: apiKeyInfo.LeakedUrl,
                         revocationSource: apiKeyInfo.RevocationSource,
-                        manageApiKeyUrl: Url.ManageMyApiKeys(relativeUrl: false),
-                        contactUrl: Url.Contact(relativeUrl: false));
+                        manageApiKeyUrl: Url.ManageMyApiKeys(relativeUrl: false, supportEmail: true),
+                        contactUrl: Url.Contact(relativeUrl: false, supportEmail: true));
                     await _messageService.SendMessageAsync(credentialRevokedMessage);
 
                     await _authenticationService.RevokeApiKeyCredential(apiKeyCredential, revocationSourceKey, commitChanges: false);

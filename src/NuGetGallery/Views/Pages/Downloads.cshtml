@@ -41,7 +41,7 @@
         <div class="col-md-4">
             <!-- ko foreach: artifacts -->
             <!-- ko if: name == "win-x86-commandline" -->
-            <div data-bind="template: { name: 'tool-list-template', data: $data }"></div>
+            <div id="win-x86-versions" data-bind="template: { name: 'tool-list-template', data: $data }"></div>
             <!-- /ko -->
             <!-- /ko -->
         </div>
@@ -62,7 +62,7 @@
     </div>
 </section>
 
-<script type="text/html" id="tool-list-template">
+<script type="text/html" id="tool-list-template" nonce="@Html.GetCSPNonce()">
     <h2 class="ms-fontSize-xxl" data-bind="text: displayName"></h2>
     <!-- ko if: note -->
     <p data-bind="html: note"></p>
@@ -80,7 +80,7 @@
 </script>
 
 @section BottomScripts {
-    <script type="text/javascript">
+    <script type="text/javascript" nonce="@Html.GetCSPNonce()">
         $(function () {
             $.ajax({
                 url: '//dist.nuget.org/index.json',
@@ -93,12 +93,13 @@
                     if (typeof data == "string") {
                         data = $.parseJSON(data);
                     }
-
                     ko.applyBindings(data, $('#stage-dynamic').get(0));
                     $('#stage-static').hide();
+                    $(document).trigger('dataLoaded');
                     $('#stage-dynamic').show();
                 }
             });
         });
     </script>
+    @Scripts.RenderFormat("<script src=\"{0}\" nonce='" + @Html.GetCSPNonce().ToString() + "'></script>", "~/Scripts/gallery/page-downloads.min.js");
 }

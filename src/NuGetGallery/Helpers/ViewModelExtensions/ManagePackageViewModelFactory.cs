@@ -7,6 +7,7 @@ using System.Linq;
 using System.Web.Mvc;
 using NuGet.Services.Entities;
 using NuGet.Versioning;
+using NuGetGallery.Frameworks;
 
 namespace NuGetGallery
 {
@@ -14,9 +15,9 @@ namespace NuGetGallery
     {
         private readonly ListPackageItemViewModelFactory _listPackageItemViewModelFactory;
 
-        public ManagePackageViewModelFactory(IIconUrlProvider iconUrlProvider)
+        public ManagePackageViewModelFactory(IIconUrlProvider iconUrlProvider, IPackageFrameworkCompatibilityFactory frameworkCompatibilityFactory, IFeatureFlagService featureFlagService)
         {
-            _listPackageItemViewModelFactory = new ListPackageItemViewModelFactory(iconUrlProvider);
+            _listPackageItemViewModelFactory = new ListPackageItemViewModelFactory(iconUrlProvider, frameworkCompatibilityFactory, featureFlagService);
         }
 
         public ManagePackageViewModel Create(
@@ -25,10 +26,11 @@ namespace NuGetGallery
             IReadOnlyList<ReportPackageReason> reasons,
             UrlHelper url,
             string readMe,
-            bool isManageDeprecationEnabled)
+            bool isManageDeprecationEnabled,
+            bool isMarkdigMdSyntaxHighlightEnabled)
         {
             var viewModel = new ManagePackageViewModel();
-            return Setup(viewModel, package, currentUser, reasons, url, readMe, isManageDeprecationEnabled);
+            return Setup(viewModel, package, currentUser, reasons, url, readMe, isManageDeprecationEnabled, isMarkdigMdSyntaxHighlightEnabled);
         }
 
         public ManagePackageViewModel Setup(
@@ -38,10 +40,11 @@ namespace NuGetGallery
             IReadOnlyList<ReportPackageReason> reasons,
             UrlHelper url,
             string readMe,
-            bool isManageDeprecationEnabled)
+            bool isManageDeprecationEnabled,
+            bool isMarkdigMdSyntaxHighlightEnabled)
         {
             _listPackageItemViewModelFactory.Setup(viewModel, package, currentUser);
-            return SetupInternal(viewModel, package, currentUser, reasons, url, readMe, isManageDeprecationEnabled);
+            return SetupInternal(viewModel, package, currentUser, reasons, url, readMe, isManageDeprecationEnabled, isMarkdigMdSyntaxHighlightEnabled);
         }
 
         private ManagePackageViewModel SetupInternal(
@@ -51,7 +54,8 @@ namespace NuGetGallery
             IReadOnlyList<ReportPackageReason> reasons,
             UrlHelper url,
             string readMe,
-            bool isManageDeprecationEnabled)
+            bool isManageDeprecationEnabled,
+            bool isMarkdigMdSyntaxHighlightEnabled)
         {
             viewModel.IsCurrentUserAnAdmin = currentUser != null && currentUser.IsAdministrator;
 
@@ -71,6 +75,7 @@ namespace NuGetGallery
             viewModel.IsLocked = package.PackageRegistration.IsLocked;
 
             viewModel.IsManageDeprecationEnabled = isManageDeprecationEnabled;
+            viewModel.IsMarkdigMdSyntaxHighlightEnabled = isMarkdigMdSyntaxHighlightEnabled;
 
             var versionSelectPackages = package.PackageRegistration.Packages
                 .Where(p => p.PackageStatusKey == PackageStatus.Available || p.PackageStatusKey == PackageStatus.Validating)
@@ -86,8 +91,6 @@ namespace NuGetGallery
             var versionDeprecationStateDictionary = new Dictionary<string, ManagePackageViewModel.VersionDeprecationState>();
             viewModel.VersionDeprecationStateDictionary = versionDeprecationStateDictionary;
 
-            var submitUrlTemplate = url.PackageVersionActionTemplate("Edit");
-            var getReadMeUrlTemplate = url.PackageVersionActionTemplate("GetReadMeMd");
             foreach (var versionSelectPackage in versionSelectPackages)
             {
                 var text = PackageHelper.GetSelectListText(versionSelectPackage);
@@ -106,10 +109,7 @@ namespace NuGetGallery
                 var model = new TrivialPackageVersionModel(versionSelectPackage);
                 versionReadMeStateDictionary.Add(
                     value,
-                    new ManagePackageViewModel.VersionReadMeState(
-                        submitUrlTemplate.Resolve(model),
-                        getReadMeUrlTemplate.Resolve(model),
-                        null));
+                    GetVersionReadMeState(model, url));
 
                 versionDeprecationStateDictionary.Add(
                     value,
@@ -118,7 +118,7 @@ namespace NuGetGallery
 
             // Update edit model with the readme.md data.
             viewModel.ReadMe = new EditPackageVersionReadMeRequest();
-            if (package.HasReadMe)
+            if (package.HasReadMe && package.EmbeddedReadmeType == EmbeddedReadmeFileType.Absent)
             {
                 viewModel.ReadMe.ReadMe.SourceType = ReadMeService.TypeWritten;
                 viewModel.ReadMe.ReadMe.SourceText = readMe;
@@ -155,6 +155,22 @@ namespace NuGetGallery
                 result.CustomMessage = deprecation.CustomMessage;
             }
 
+            return result;
+        }
+
+        private static ManagePackageViewModel.VersionReadMeState GetVersionReadMeState(
+            TrivialPackageVersionModel model,
+            UrlHelper url)
+        {
+            var submitUrlTemplate = url.PackageVersionActionTemplate("Edit");
+            var getReadMeUrlTemplate = url.PackageVersionActionTemplate("GetReadMeMd");
+
+            var result = new ManagePackageViewModel.VersionReadMeState(
+                submitUrlTemplate.Resolve(model),
+                getReadMeUrlTemplate.Resolve(model),
+                readMe: null);
+
+            result.HasEmbeddedReadme = model.HasEmbeddedReadme;
             return result;
         }
     }

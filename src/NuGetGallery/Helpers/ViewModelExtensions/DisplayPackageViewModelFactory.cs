@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -6,6 +6,9 @@ using System.Collections.Generic;
 using System.Linq;
 using NuGet.Services.Entities;
 using NuGet.Versioning;
+using NuGetGallery.Frameworks;
+using NuGetGallery.Helpers;
+using NuGetGallery.Services.Helpers;
 
 namespace NuGetGallery
 {
@@ -13,9 +16,9 @@ namespace NuGetGallery
     {
         private readonly ListPackageItemViewModelFactory _listPackageItemViewModelFactory;
 
-        public DisplayPackageViewModelFactory(IIconUrlProvider iconUrlProvider)
+        public DisplayPackageViewModelFactory(IIconUrlProvider iconUrlProvider, IPackageFrameworkCompatibilityFactory frameworkCompatibilityFactory, IFeatureFlagService featureFlagService)
         {
-            _listPackageItemViewModelFactory = new ListPackageItemViewModelFactory(iconUrlProvider);
+            _listPackageItemViewModelFactory = new ListPackageItemViewModelFactory(iconUrlProvider, frameworkCompatibilityFactory, featureFlagService);
         }
 
         public DisplayPackageViewModel Create(
@@ -23,8 +26,9 @@ namespace NuGetGallery
             IReadOnlyCollection<Package> allVersions,
             User currentUser,
             IReadOnlyDictionary<int, PackageDeprecation> packageKeyToDeprecation,
+            IReadOnlyDictionary<int, IReadOnlyList<PackageVulnerability>> packageKeyToVulnerabilities,
             IReadOnlyList<PackageRename> packageRenames,
-            RenderedReadMeResult readmeResult)
+            RenderedMarkdownResult readmeResult)
         {
             var viewModel = new DisplayPackageViewModel();
             return Setup(
@@ -33,6 +37,7 @@ namespace NuGetGallery
                 allVersions,
                 currentUser,
                 packageKeyToDeprecation,
+                packageKeyToVulnerabilities,
                 packageRenames,
                 readmeResult);
         }
@@ -43,12 +48,15 @@ namespace NuGetGallery
             IReadOnlyCollection<Package> allVersions,
             User currentUser,
             IReadOnlyDictionary<int, PackageDeprecation> packageKeyToDeprecation,
+            IReadOnlyDictionary<int, IReadOnlyList<PackageVulnerability>> packageKeyToVulnerabilities,
             IReadOnlyList<PackageRename> packageRenames,
-            RenderedReadMeResult readmeResult)
+            RenderedMarkdownResult readmeResult)
         {
             _listPackageItemViewModelFactory.Setup(viewModel, package, currentUser);
-            SetupCommon(viewModel, package, pushedBy: null, packageKeyToDeprecation: packageKeyToDeprecation);
-            return SetupInternal(viewModel, package, allVersions, currentUser, packageKeyToDeprecation, packageRenames, readmeResult);
+            SetupCommon(viewModel, package, pushedBy: null,
+                packageKeyToDeprecation: packageKeyToDeprecation, packageKeyToVulnerabilities: packageKeyToVulnerabilities);
+            return SetupInternal(viewModel, package, allVersions, currentUser,
+                packageKeyToDeprecation, packageKeyToVulnerabilities, packageRenames, readmeResult);
         }
 
         private DisplayPackageViewModel SetupInternal(
@@ -57,8 +65,9 @@ namespace NuGetGallery
             IReadOnlyCollection<Package> allVersions,
             User currentUser,
             IReadOnlyDictionary<int, PackageDeprecation> packageKeyToDeprecation,
+            IReadOnlyDictionary<int, IReadOnlyList<PackageVulnerability>> packageKeyToVulnerabilities,
             IReadOnlyList<PackageRename> packageRenames,
-            RenderedReadMeResult readmeResult)
+            RenderedMarkdownResult readmeResult)
         {
             var dependencies = package.Dependencies.ToList();
 
@@ -70,11 +79,11 @@ namespace NuGetGallery
             var pushedByCache = new Dictionary<User, string>();
             viewModel.PackageVersions = packageHistory
                 .Select(
-                    p => 
+                    p =>
                     {
                         var vm = new DisplayPackageViewModel();
                         _listPackageItemViewModelFactory.Setup(vm, p, currentUser);
-                        return SetupCommon(vm, p, GetPushedBy(p, currentUser, pushedByCache), packageKeyToDeprecation);
+                        return SetupCommon(vm, p, GetPushedBy(p, currentUser, pushedByCache), packageKeyToDeprecation, packageKeyToVulnerabilities);
                     })
                 .ToList();
 
@@ -98,6 +107,8 @@ namespace NuGetGallery
                 // Lazily load the package types from the database.
                 viewModel.IsDotnetToolPackageType = package.PackageTypes.Any(e => e.Name.Equals("DotnetTool", StringComparison.OrdinalIgnoreCase));
                 viewModel.IsDotnetNewTemplatePackageType = package.PackageTypes.Any(e => e.Name.Equals("Template", StringComparison.OrdinalIgnoreCase));
+                viewModel.IsMSBuildSdkPackageType = package.PackageTypes.Any(e => e.Name.Equals("MSBuildSdk", StringComparison.OrdinalIgnoreCase));
+                viewModel.IsMcpServerPackageType = package.PackageTypes.Any(e => e.Name.Equals(McpHelper.McpServerPackageTypeName, StringComparison.OrdinalIgnoreCase));
             }
 
             if (packageKeyToDeprecation != null && packageKeyToDeprecation.TryGetValue(package.Key, out var deprecation))
@@ -127,7 +138,9 @@ namespace NuGetGallery
 
             viewModel.ReadMeHtml = readmeResult?.Content;
             viewModel.ReadMeImagesRewritten = readmeResult != null ? readmeResult.ImagesRewritten : false;
+            viewModel.ReadmeImageSourceDisallowed = readmeResult != null ? readmeResult.ImageSourceDisallowed : false;
             viewModel.HasEmbeddedIcon = package.HasEmbeddedIcon;
+            viewModel.HasEmbeddedReadmeFile = package.HasEmbeddedReadme;
 
             return viewModel;
         }
@@ -136,7 +149,8 @@ namespace NuGetGallery
             DisplayPackageViewModel viewModel,
             Package package,
             string pushedBy,
-            IReadOnlyDictionary<int, PackageDeprecation> packageKeyToDeprecation)
+            IReadOnlyDictionary<int, PackageDeprecation> packageKeyToDeprecation,
+            IReadOnlyDictionary<int, IReadOnlyList<PackageVulnerability>> packageKeyToVulnerabilities)
         {
             viewModel.NuGetVersion = NuGetVersion.Parse(NuGetVersionFormatter.ToFullString(package.Version));
             viewModel.Copyright = package.Copyright;
@@ -156,6 +170,26 @@ namespace NuGetGallery
                 viewModel.ProjectUrl = projectUrl;
             }
 
+            viewModel.InitializeComparableGitHubRepository();
+
+            var fugetUrl = $"https://www.fuget.org/packages/{package.Id}/{package.NormalizedVersion}";
+            if (PackageHelper.TryPrepareUrlForRendering(fugetUrl, out string fugetReadyUrl))
+            {
+                viewModel.FuGetUrl = fugetReadyUrl;
+            }
+
+            var nugetPackageExplorerUrl = $"https://nuget.info/packages/{package.Id}/{package.NormalizedVersion}";
+            if (PackageHelper.TryPrepareUrlForRendering(nugetPackageExplorerUrl, out string nugetPackageExplorerReadyUrl))
+            {
+                viewModel.NuGetPackageExplorerUrl = nugetPackageExplorerReadyUrl;
+            }
+
+            var nugetTrendsUrl = $"https://nugettrends.com/packages?ids={package.Id}";
+            if (PackageHelper.TryPrepareUrlForRendering(nugetTrendsUrl, out string nugetTrendsReadyUrl))
+            {
+                viewModel.NuGetTrendsUrl = nugetTrendsReadyUrl;
+            }
+
             viewModel.EmbeddedLicenseType = package.EmbeddedLicenseType;
             viewModel.LicenseExpression = package.LicenseExpression;
 
@@ -170,7 +204,8 @@ namespace NuGetGallery
                 }
             }
 
-            if (packageKeyToDeprecation != null && packageKeyToDeprecation.TryGetValue(package.Key, out var deprecation))
+            PackageDeprecation deprecation = null;
+            if (packageKeyToDeprecation != null && packageKeyToDeprecation.TryGetValue(package.Key, out deprecation))
             {
                 viewModel.DeprecationStatus = deprecation.Status;
             }
@@ -178,6 +213,23 @@ namespace NuGetGallery
             {
                 viewModel.DeprecationStatus = PackageDeprecationStatus.NotDeprecated;
             }
+
+            PackageVulnerabilitySeverity? maxVulnerabilitySeverity = null;
+            if (packageKeyToVulnerabilities != null
+                && packageKeyToVulnerabilities.TryGetValue(package.Key, out var vulnerabilities)
+                && vulnerabilities != null && vulnerabilities.Any())
+            {
+                viewModel.Vulnerabilities = vulnerabilities.OrderByDescending(vul => vul.Severity).ToList().AsReadOnly();
+                maxVulnerabilitySeverity = viewModel.Vulnerabilities.Max(v => v.Severity); // cache for messaging
+                viewModel.MaxVulnerabilitySeverity = maxVulnerabilitySeverity.Value;
+            }
+            else
+            {
+                viewModel.Vulnerabilities = null;
+                viewModel.MaxVulnerabilitySeverity = default;
+            }
+
+            viewModel.PackageWarningIconTitle = WarningTitleHelper.GetWarningIconTitle(viewModel.Version, deprecation, maxVulnerabilitySeverity);
 
             return viewModel;
         }

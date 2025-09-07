@@ -7,11 +7,9 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NuGet.Services.Entities;
@@ -19,7 +17,7 @@ using Xunit;
 
 namespace NuGetGallery
 {
-    public class GravatarProxyServiceFacts
+    public class GravatarProxyServiceFacts : IDisposable
     {
         private static readonly User User = new User
         {
@@ -381,6 +379,11 @@ namespace NuGetGallery
 
                 return Task.FromResult(handler(request));
             }
+        }
+
+        public void Dispose()
+        {
+            _messageHandler.Dispose();
         }
     }
 }

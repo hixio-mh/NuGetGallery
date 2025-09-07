@@ -1,4 +1,8 @@
-﻿var EditReadMeManager = (function () {
+﻿var SelectedVersion = (function () {
+    return $('.page-edit-package #input-select-readme');
+})
+
+var EditReadMeManager = (function () {
     'use strict';
 
     return new function () {
@@ -14,14 +18,15 @@
             _submitted = false;
             _viewModel = model;
             _changedState = {};
+
+            _selectVersion = SelectedVersion();
+            var defaultVersion = _selectVersion.val();
+
             BindReadMeDataManager.init(previewUrl);
 
             bindData(_viewModel);
 
             $(window).on('beforeunload', confirmLeave);
-
-            _selectVersion = $('.page-edit-package #input-select-readme');
-            var defaultVersion = _selectVersion.val();
             
             _selectVersion.change(function () {
                 var selectedVersion = $(this).val();
@@ -184,6 +189,21 @@
             if (model === null || !model.IsSymbolsPackage) {
                 BindReadMeDataManager.bindReadMeData(model);
             }
+
+            var selectedVersion = _selectVersion.val();
+
+            if (!selectedVersion) {
+                // No version is selected.
+                return;
+            }
+
+            if (model.Versions[selectedVersion].HasEmbeddedReadme) {
+                $('#edit-markdown-button').addClass('hidden');
+                $('#verify-submit-button').addClass('hidden');
+            } else {
+                $('#edit-markdown-button').removeClass('hidden');
+                $('#verify-submit-button').removeClass('hidden');
+            }
         }
     };
 }());
@@ -193,6 +213,7 @@ var BindReadMeDataManager = (function () {
 
     return new function () {
         var _previewUrl;
+        var _model;
 
         this.init = function (previewUrl) {
             _previewUrl = previewUrl;
@@ -203,6 +224,8 @@ var BindReadMeDataManager = (function () {
 
             if (model === null) {
                 return;
+            } else {
+                _model = model;
             }
 
             model.SelectedTab = ko.observable('written');
@@ -214,7 +237,6 @@ var BindReadMeDataManager = (function () {
             var readMeContainerElement = document.createElement("div");
             $(readMeContainerElement).attr("id", "import-readme-block");
             $(readMeContainerElement).attr("class", "collapse in");
-            $(readMeContainerElement).attr("aria-expanded", "true");
             $(readMeContainerElement).attr("data-bind", "template: { name: 'import-readme-template', data: data }");
             $("#import-readme-container").append(readMeContainerElement);
             ko.applyBindings({ data: model }, readMeContainerElement);
@@ -289,9 +311,12 @@ var BindReadMeDataManager = (function () {
                 contentType: false,
                 processData: false,
                 data: window.nuget.addAjaxAntiForgeryToken(formData),
-                success: function (model, resultCodeString, fullResponse) {
+                success: function (response, resultCodeString, fullResponse) {
                     clearReadMeError();
-                    displayReadMePreview(model);
+                    displayReadMePreview(response);
+                    if (response.IsMarkdigMdSyntaxHighlightEnabled) {
+                        syntaxHighlight();
+                    }
                 },
                 error: function (jqXHR, exception) {
                     var message = "";
@@ -313,12 +338,20 @@ var BindReadMeDataManager = (function () {
 
             $('.readme-tabs').children().hide();
 
-            $("#edit-markdown").removeClass("hidden");
+            var selectedVersion = SelectedVersion().val();
+            if (!selectedVersion || !_model.Versions[selectedVersion].HasEmbeddedReadme) {
+                $("#edit-markdown").removeClass("hidden");
+            }
+
             $("#preview-html").addClass("hidden");
             clearReadMeError();
 
             if (response.ImagesRewritten) {
-                displayReadMeWarning("Some images were automatically rewritten to use secure links and might be broken.");
+                displayReadMeWarning("Some images were automatically rewritten to use secure links and may be broken.");
+            }
+
+            if (response.ImageSourceDisallowed) {
+                displayReadMeWarning("Some images are not displayed as they are not from <a href='https://aka.ms/nuget-org-readme#allowed-domains-for-images-and-badges'>trusted domains</a>.");
             }
         }
 
@@ -334,10 +367,13 @@ var BindReadMeDataManager = (function () {
 
         function displayReadMeWarning(errorMsg) {
             $("#readme-warnings").removeClass("hidden");
-            $("#readme-warning-content").text(errorMsg);
+            $("#readme-warning-content").html(errorMsg);
         }
 
         function displayReadMeError(errorMsg) {
+            // In order for Narrator to read the alert, this should be on an aria-label attribute.
+            $("#readme-error-content").attr("aria-label", errorMsg);
+
             $("#readme-errors").removeClass("hidden");
             $("#preview-readme-button").attr("disabled", "disabled");
 
@@ -357,6 +393,7 @@ var BindReadMeDataManager = (function () {
             if (!$("#readme-errors").hasClass("hidden")) {
                 $("#readme-errors").addClass("hidden");
                 $("#readme-error-content").text("");
+                $("#readme-error-content").removeAttr("aria-label");
             }
             $("#preview-readme-button").prop("disabled", false);
         }

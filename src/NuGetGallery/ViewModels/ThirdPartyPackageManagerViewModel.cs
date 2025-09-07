@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 namespace NuGetGallery
@@ -15,11 +15,22 @@ namespace NuGetGallery
         /// </summary>
         public string ContactUrl { get; set; }
 
-        public ThirdPartyPackageManagerViewModel(string name, string contactUrl) : base(name)
+        public ThirdPartyPackageManagerViewModel(
+            string id,
+            string name,
+            string contactUrl,
+            params InstallPackageCommand[] installPackageCommands
+            ) : base(
+                id,
+                name,
+                installPackageCommands
+                )
         {
             ContactUrl = contactUrl;
             AlertLevel = AlertLevel.Warning;
-            AlertMessage = string.Format("The NuGet Team does not provide support for this client. Please contact its <a href=\"{0}\">maintainers</a> for support.", contactUrl);
+            // the b tag below adds an element that is not displayed, but that allows screen readers to announce "warning" before the following alert message text
+            AlertMessage = "<b display=\"none\" aria-label=\"warning\" role=\"alert\"></b> The NuGet Team does not provide support for this client. Please contact its "
+                + $"<a href=\"{contactUrl}\" aria-label=\"Contact the maintainers of the {name} client\">maintainers</a> for support.";
         }
     }
 }

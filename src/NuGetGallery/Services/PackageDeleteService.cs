@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.WindowsAzure.Storage;
 using NuGet.Services.Entities;
 using NuGet.Versioning;
 using NuGetGallery.Auditing;
@@ -55,6 +54,7 @@ namespace NuGetGallery
         private readonly ISymbolPackageService _symbolPackageService;
         private readonly IEntityRepository<SymbolPackage> _symbolPackageRepository;
         private readonly ICoreLicenseFileService _coreLicenseFileService;
+        private readonly ICoreReadmeFileService _coreReadmeFileService;
 
         public PackageDeleteService(
             IEntityRepository<Package> packageRepository,
@@ -71,7 +71,8 @@ namespace NuGetGallery
             ISymbolPackageFileService symbolPackageFileService,
             ISymbolPackageService symbolPackageService,
             IEntityRepository<SymbolPackage> symbolPackageRepository,
-            ICoreLicenseFileService coreLicenseFileService)
+            ICoreLicenseFileService coreLicenseFileService,
+            ICoreReadmeFileService coreReadmeFileService)
         {
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _packageRegistrationRepository = packageRegistrationRepository ?? throw new ArgumentNullException(nameof(packageRegistrationRepository));
@@ -88,6 +89,7 @@ namespace NuGetGallery
             _symbolPackageService = symbolPackageService ?? throw new ArgumentNullException(nameof(symbolPackageService));
             _symbolPackageRepository = symbolPackageRepository ?? throw new ArgumentNullException(nameof(symbolPackageRepository));
             _coreLicenseFileService = coreLicenseFileService ?? throw new ArgumentNullException(nameof(coreLicenseFileService));
+            _coreReadmeFileService = coreReadmeFileService ?? throw new ArgumentNullException(nameof(coreReadmeFileService));
 
             if (config.HourLimitWithMaximumDownloads.HasValue
                 && config.StatisticsUpdateFrequencyInHours.HasValue
@@ -250,7 +252,7 @@ namespace NuGetGallery
 
         public async Task SoftDeletePackagesAsync(IEnumerable<Package> packages, User deletedBy, string reason, string signature)
         {
-            using (var strategy = new SuspendDbExecutionStrategy())
+            using (new SuspendDbExecutionStrategy())
             using (var transaction = _entitiesContext.GetDatabase().BeginTransaction())
             {
                 // Increase command timeout
@@ -320,7 +322,7 @@ namespace NuGetGallery
 
         public async Task HardDeletePackagesAsync(IEnumerable<Package> packages, User deletedBy, string reason, string signature, bool deleteEmptyPackageRegistration)
         {
-            using (var strategy = new SuspendDbExecutionStrategy())
+            using (new SuspendDbExecutionStrategy())
             using (var transaction = _entitiesContext.GetDatabase().BeginTransaction())
             {
                 // Increase command timeout
@@ -517,9 +519,16 @@ namespace NuGetGallery
         {
             try
             {
-                await _packageFileService.DeleteReadMeMdFileAsync(package);
+                if (package.HasEmbeddedReadme)
+                {
+                    await _coreReadmeFileService.DeleteReadmeFileAsync(package.Id, package.Version);
+                }
+                else
+                {
+                    await _packageFileService.DeleteReadMeMdFileAsync(package);
+                }
             }
-            catch (StorageException) { }
+            catch (CloudBlobStorageException) { }
         }
 
         private void UnlinkPackageDeprecations(Package package)

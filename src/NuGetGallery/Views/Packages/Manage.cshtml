@@ -54,8 +54,8 @@
 
             @ViewHelpers.Section(
                 this,
-                "Documentation",
-                "Documentation",
+                "Readme",
+                "Readme",
                 @<text>@Html.Partial("_ManageDocumentation", Model)</text>,
                 expanded: false)
         </div>
@@ -63,7 +63,7 @@
 </section>
 
 @section BottomScripts {
-    <script type="text/javascript">
+    <script type="text/javascript" nonce="@Html.GetCSPNonce()">
         // Set up owners section
         var packageId = "@Model.Id";
         var isUserAnAdmin = "@Model.IsCurrentUserAnAdmin";
@@ -136,9 +136,17 @@
                 '@Url.GetDeprecationAlternatePackageVersions()');
         });
     </script>
+
+
+    @if (Model.IsMarkdigMdSyntaxHighlightEnabled)
+    {
+        @ViewHelpers.IncludeSyntaxHighlightScript();
+    }
+    
     @ViewHelpers.SectionsScript(this)
     @Scripts.Render("~/Scripts/gallery/page-manage-owners.min.js")
     @Scripts.Render("~/Scripts/gallery/page-manage-deprecation.min.js")
     @Scripts.Render("~/Scripts/gallery/page-delete-package.min.js")
     @Scripts.Render("~/Scripts/gallery/page-edit-readme.min.js")
+    @Scripts.Render("~/Scripts/gallery/syntaxhighlight.min.js")
 }

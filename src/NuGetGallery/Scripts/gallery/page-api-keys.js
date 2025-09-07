@@ -9,23 +9,13 @@
     var DeleteErrorMessage = "An error occurred while deleting the API key. Please try again.";
     var CreateErrorMessage = "An error occurred while creating a new API key. Please try again.";
     var EditErrorMessage = "An error occurred while editing an API key. Please try again.";
+    var ConfirmRevokeMessage = "Are you sure you want to revoke the API key?";
+    var RevokeErrorMessage = "An error occurred while revoking the API key. Please try again.";
 
     $(function () {
         function addAntiForgeryToken(data) {
             var $field = $("#AntiForgeryForm input[name=__RequestVerificationToken]");
             data["__RequestVerificationToken"] = $field.val();
-        }
-
-        function executeOnInactive(onTimeout, timeoutInMs) {
-            var t;
-            window.onload = resetTimer;
-            document.onmousemove = resetTimer;
-            document.onkeypress = resetTimer;
-
-            function resetTimer() {
-                clearTimeout(t);
-                t = setTimeout(onTimeout, timeoutInMs)
-            }
         }
 
         function globToRegex(glob) {
@@ -433,13 +423,17 @@
                 window.nuget.resetFormValidation(formElement);
 
                 // Remove error classes from the form groups.
-                $("#" + containerId + " .form-group.has-error").removeClass("has-error");
+                $("#" + containerId + " .form-group.has-error-brand").removeClass("has-error-brand");
 
                 // Scroll to the top of the available packages list.
                 $("#" + containerId + " .available-packages .panel-body").scrollTop(0);
 
                 // Re-attach extensions.
                 self.AttachExtensions();
+
+                // Focus the edit link so that the next tab key will continue with where it was left off prior to
+                // opening the edit form. See https://github.com/NuGet/NuGetGallery/issues/8183.
+                $("#" + self.StartEditId()).focus();
             };
 
             this.ShowRemainingPackages = function (_, e) {
@@ -512,6 +506,38 @@
                     },
                     error: function (jqXHR, textStatus, errorThrown) {
                         parent.Error(DeleteErrorMessage);
+                    }
+                });
+            };
+
+            this.Revoke = function () {
+                if (!window.nuget.confirmEvent(ConfirmRevokeMessage)) {
+                    return;
+                }
+
+                // Build the request.
+                var data = {
+                    credentialType: this.Type(),
+                    credentialKey: this.Key(),
+                };
+                addAntiForgeryToken(data);
+
+                // Send the request.
+                $.ajax({
+                    url: initialData.RevokeUrl,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: data,
+                    success: function (data) {
+                        parent.Error(null);
+                        self._UpdateData(data);
+                        self.JustCreated(false);
+                        self.JustRegenerated(false);
+                        parent.ApiKeys.remove(self);
+                        parent.ApiKeys.unshift(self);
+                    },
+                    error: function (jqXHR, textStatus, errorThrown) {
+                        parent.Error(RevokeErrorMessage);
                     }
                 });
             };
@@ -682,7 +708,7 @@
         window.nuget.configureExpanderHeading("manage-container");
 
         // Start the idle timer for 10 minutes.
-        executeOnInactive(apiKeyListViewModel.Idle, 10 * 60 * 1000);
+        window.nuget.executeOnInactive(apiKeyListViewModel.Idle, 10 * 60 * 1000);
     });
 
 })();

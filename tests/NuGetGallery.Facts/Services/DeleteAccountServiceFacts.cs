@@ -21,7 +21,7 @@ namespace NuGetGallery.Services
     {
         public class TheDeleteGalleryUserAccountAsyncMethod
         {
-            private static int Key = -1;
+            private int Key = -1;
 
             [Theory]
             [InlineData(false)]
@@ -127,7 +127,7 @@ namespace NuGetGallery.Services
 
                 if (orphanPolicy == AccountDeletionOrphanPackagePolicy.DoNotAllowOrphans && isPackageOrphaned)
                 {
-                    Assert.True(registration.Owners.Any(o => o.MatchesUser(testUser)));
+                    Assert.Contains(registration.Owners, o => o.MatchesUser(testUser));
                     Assert.NotEmpty(testUser.SecurityPolicies);
                     Assert.True(registration.Packages.Single().Listed);
                     Assert.NotNull(testUser.EmailAddress);
@@ -146,7 +146,7 @@ namespace NuGetGallery.Services
                 }
                 else
                 {
-                    Assert.False(registration.Owners.Any(o => o.MatchesUser(testUser)));
+                    Assert.DoesNotContain(registration.Owners, o => o.MatchesUser(testUser));
                     Assert.Empty(testUser.SecurityPolicies);
                     Assert.Equal(
                         orphanPolicy == AccountDeletionOrphanPackagePolicy.UnlistOrphans && isPackageOrphaned,
@@ -214,7 +214,7 @@ namespace NuGetGallery.Services
                 Assert.True(status.Success);
                 Assert.Null(testableService.User);
                 Assert.Single(testableService.AuditService.Records);
-                Assert.Equal(1, testableService.AuditService.Records.Count);
+                Assert.Single(testableService.AuditService.Records);
                 var deleteAccountAuditRecord = testableService.AuditService.Records[0] as DeleteAccountAuditRecord;
                 Assert.NotNull(deleteAccountAuditRecord);
                 Assert.Equal(testUser.Username, deleteAccountAuditRecord.AdminUsername);
@@ -268,7 +268,7 @@ namespace NuGetGallery.Services
                 {
                     Assert.False(status.Success);
                     Assert.Equal(organization.Confirmed, organization.EmailAddress != null);
-                    Assert.True(registration.Owners.Any(o => o.MatchesUser(organization)));
+                    Assert.Contains(registration.Owners, o => o.MatchesUser(organization));
                     Assert.NotEmpty(organization.SecurityPolicies);
                     Assert.NotNull(testableService.PackagePushedByUser.User);
                     Assert.NotNull(testableService.DeprecationDeprecatedByUser.DeprecatedByUser);
@@ -287,7 +287,7 @@ namespace NuGetGallery.Services
                     Assert.Equal(
                         orphanPolicy == AccountDeletionOrphanPackagePolicy.UnlistOrphans && isPackageOrphaned,
                         !registration.Packages.Single().Listed);
-                    Assert.False(registration.Owners.Any(o => o.MatchesUser(organization)));
+                    Assert.DoesNotContain(registration.Owners, o => o.MatchesUser(organization));
                     Assert.Empty(organization.SecurityPolicies);
                     Assert.Null(testableService.PackagePushedByUser.User);
                     Assert.Null(testableService.DeprecationDeprecatedByUser.DeprecatedByUser);
@@ -420,7 +420,7 @@ namespace NuGetGallery.Services
                 if (multipleOwners)
                 {
                     Assert.Contains<User>(newOwner, registration.Owners);
-                    Assert.Equal(1, registration.Owners.Count());
+                    Assert.Single(registration.Owners);
                 }
                 else
                 {
@@ -429,7 +429,7 @@ namespace NuGetGallery.Services
             }
 
 
-            private static User CreateTestUserWithRegistration(ref PackageRegistration registration)
+            private User CreateTestUserWithRegistration(ref PackageRegistration registration)
             {
                 var testUser = new User("TestUser") { Key = Key++ };
                 testUser.EmailAddress = "user@test.com";
@@ -439,7 +439,7 @@ namespace NuGetGallery.Services
                 return testUser;
             }
 
-            private static User CreateTestUser(ref PackageRegistration registration)
+            private User CreateTestUser(ref PackageRegistration registration)
             {
                 var testUser = new User("TestUser") { Key = Key++ };
                 testUser.EmailAddress = "user@test.com";
@@ -473,7 +473,7 @@ namespace NuGetGallery.Services
                 return testUser;
             }
 
-            private static void AddOrganizationMigrationRequest(User testUser)
+            private void AddOrganizationMigrationRequest(User testUser)
             {
                 var testOrganizationAdmin = new User("TestOrganizationAdmin") { Key = Key++ };
 
@@ -482,7 +482,7 @@ namespace NuGetGallery.Services
                 testOrganizationAdmin.OrganizationMigrationRequests.Add(request);
             }
 
-            private static void AddOrganizationMigrationRequests(User testUser)
+            private void AddOrganizationMigrationRequests(User testUser)
             {
                 var testOrganization = new Organization("testOrganization") { Key = Key++ };
 
@@ -491,7 +491,7 @@ namespace NuGetGallery.Services
                 testUser.OrganizationMigrationRequests.Add(request);
             }
 
-            private static void AddOrganizationRequests(User testUser, bool isAdmin)
+            private void AddOrganizationRequests(User testUser, bool isAdmin)
             {
                 var testOrganization = new Organization("testOrganization") { Key = Key++ };
 
@@ -500,7 +500,7 @@ namespace NuGetGallery.Services
                 testUser.OrganizationRequests.Add(request);
             }
 
-            private static void AddOrganization(User testUser, bool isAdmin, bool hasAdminMember, bool hasCollaboratorMember)
+            private void AddOrganization(User testUser, bool isAdmin, bool hasAdminMember, bool hasCollaboratorMember)
             {
                 var testOrganization = new Organization("testOrganization") { Key = Key++ };
 
@@ -805,7 +805,8 @@ namespace NuGetGallery.Services
                 var packageService = new Mock<IPackageService>();
                 if (_user != null)
                 {
-                    packageService.Setup(m => m.FindPackagesByAnyMatchingOwner(_user, true, It.IsAny<bool>())).Returns(_userPackages);
+                    packageService.Setup(m => m.FindPackagesByAnyMatchingOwner(
+                        _user, true, It.IsAny<bool>())).Returns(_userPackages);
                     var packageRegistraionList = new List<PackageRegistration>();
                     if(_userPackagesRegistration != null)
                     {
@@ -859,7 +860,7 @@ namespace NuGetGallery.Services
                 supportService.Setup(m => m.GetIssues(null, null, null, null)).Returns(SupportRequests);
                 if (_user != null)
                 {
-                    var issue = SupportRequests.Where(i => string.Equals(i.CreatedBy, _user.Username)).FirstOrDefault();
+                    var issue = SupportRequests.FirstOrDefault(i => string.Equals(i.CreatedBy, _user.Username));
                     supportService.Setup(m => m.DeleteSupportRequestsAsync(_user))
                         .Returns(Task.FromResult(true))
                         .Callback(() => SupportRequests.Remove(issue));

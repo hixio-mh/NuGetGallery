@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 using System.Web.Mvc;
 using System.Web.Routing;
@@ -10,11 +10,11 @@ namespace NuGetGallery
 {
     public static class Routes
     {
-        public static void RegisterRoutes(RouteCollection routes, bool feedOnlyMode = false)
+        public static void RegisterRoutes(RouteCollection routes, bool feedOnlyMode = false, bool adminPanelEnabled = false)
         {
             if (!feedOnlyMode)
             {
-                RegisterUIRoutes(routes);
+                RegisterUIRoutes(routes, adminPanelEnabled);
             }
             else
             {
@@ -29,7 +29,7 @@ namespace NuGetGallery
             RegisterApiV2Routes(routes);
         }
 
-        public static void RegisterUIRoutes(RouteCollection routes)
+        public static void RegisterUIRoutes(RouteCollection routes, bool adminPanelEnabled)
         {
             routes.MapRoute(
                 RouteName.Home,
@@ -271,20 +271,28 @@ namespace NuGetGallery
                 new { controller = "Packages", action = "SetLicenseReportVisibility", visible = false },
                 new { version = new VersionRouteConstraint() });
 
-            routes.MapRoute(
-                RouteName.PackageReflowAction,
-                "packages/manage/reflow",
-                new { controller = "Packages", action = nameof(PackagesController.Reflow) });
+            if (adminPanelEnabled)
+            {
+                routes.MapRoute(
+                    RouteName.PackageReflowAction,
+                    "packages/manage/reflow",
+                    new { controller = "Packages", action = nameof(PackagesController.Reflow) });
 
-            routes.MapRoute(
-                RouteName.PackageRevalidateAction,
-                "packages/manage/revalidate",
-                new { controller = "Packages", action = nameof(PackagesController.Revalidate) });
+                routes.MapRoute(
+                    RouteName.PackageRevalidateAction,
+                    "packages/manage/revalidate",
+                    new { controller = "Packages", action = nameof(PackagesController.Revalidate) });
 
-            routes.MapRoute(
-                RouteName.PackageRevalidateSymbolsAction,
-                "packages/manage/revalidate-symbols",
-                new { controller = "Packages", action = nameof(PackagesController.RevalidateSymbols) });
+                routes.MapRoute(
+                    RouteName.PackageRevalidateSymbolsAction,
+                    "packages/manage/revalidate-symbols",
+                    new { controller = "Packages", action = nameof(PackagesController.RevalidateSymbols) });
+
+                routes.MapRoute(
+                    RouteName.PackageDeleteAction,
+                    "packages/manage/delete",
+                    new { controller = "Packages", action = "Delete" });
+            }
 
             var packageVersionActionRoute = routes.MapRoute(
                 RouteName.PackageVersionAction,
@@ -296,11 +304,6 @@ namespace NuGetGallery
                 RouteName.PackageAction,
                 "packages/{id}/{action}",
                 new { controller = "Packages" });
-
-            var packageDeleteRoute = routes.MapRoute(
-                RouteName.PackageDeleteAction,
-                "packages/manage/delete",
-                new { controller = "Packages", action = "Delete" });
 
             var confirmationRequiredRoute = routes.MapRoute(
                 "ConfirmationRequired",
@@ -449,11 +452,14 @@ namespace NuGetGallery
                 "account/changeMultiFactorAuthentication",
                 new { controller = "Users", action = "ChangeMultiFactorAuthentication" });
 
-            routes.MapRoute(
-                RouteName.AdminDeleteAccount,
-                "account/delete/{accountName}",
-                new { controller = "Users", action = "Delete" },
-                new RouteExtensions.ObfuscatedPathMetadata(2, Obfuscator.DefaultTelemetryUserName));
+            if (adminPanelEnabled)
+            {
+                routes.MapRoute(
+                    RouteName.AdminDeleteAccount,
+                    "account/delete/{accountName}",
+                    new { controller = "Users", action = "Delete" },
+                    new RouteExtensions.ObfuscatedPathMetadata(2, Obfuscator.DefaultTelemetryUserName));
+            }
 
             routes.MapRoute(
                 RouteName.UserDeleteAccount,
@@ -527,6 +533,11 @@ namespace NuGetGallery
                 RouteName.ApiKeys,
                 "account/apikeys",
                 new { controller = "Users", action = "ApiKeys" });
+
+            routes.MapRoute(
+                RouteName.TrustedPublishing,
+                "account/trustedpublishing",
+                new { controller = "Users", action = "TrustedPublishing" });
 
             routes.MapRoute(
                 RouteName.Account,
@@ -901,6 +912,12 @@ namespace NuGetGallery
                 RouteName.ApiSimulateError,
                 "api/simulate-error",
                 new { controller = "Api", action = nameof(ApiController.SimulateError) });
+
+            routes.MapRoute(
+                RouteName.CreateToken,
+                "api/v2/token",
+                defaults: new { controller = TokenApiController.ControllerName, action = nameof(TokenApiController.CreateToken) },
+                constraints: new { httpMethod = new HttpMethodConstraint("POST") });
         }
     }
 }

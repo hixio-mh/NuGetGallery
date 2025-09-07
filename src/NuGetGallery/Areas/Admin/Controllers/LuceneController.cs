@@ -6,8 +6,6 @@ using System.Threading.Tasks;
 using System.Web.Mvc;
 using NuGetGallery.Areas.Admin.Models;
 using NuGetGallery.Configuration;
-using NuGetGallery.Diagnostics;
-using NuGetGallery.Infrastructure.Search;
 
 namespace NuGetGallery.Areas.Admin.Controllers
 {
@@ -25,7 +23,7 @@ namespace NuGetGallery.Areas.Admin.Controllers
 
         //
         // GET: /Admin/Lucene/
-
+        [HttpGet]
         public virtual async Task<ActionResult> Index()
         {
             return View("Index", await GetLuceneInfo());

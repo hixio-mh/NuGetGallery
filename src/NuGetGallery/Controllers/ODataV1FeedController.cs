@@ -13,9 +13,7 @@ using NuGet.Services.Entities;
 using NuGetGallery.Configuration;
 using NuGetGallery.OData;
 using NuGetGallery.OData.QueryFilter;
-using NuGetGallery.Services;
 using NuGetGallery.WebApi;
-using WebApi.OutputCache.V2;
 
 // ReSharper disable once CheckNamespace
 namespace NuGetGallery.Controllers
@@ -50,71 +48,108 @@ namespace NuGetGallery.Controllers
         // /api/v1/Packages
         [HttpGet]
         [HttpPost]
-        [CacheOutput(NoCache = true)]
         public IHttpActionResult Get(ODataQueryOptions<V1FeedPackage> options)
         {
+            _telemetryService.TrackApiRequest("/api/v1/Packages");
+            return Get(options, _featureFlagService.IsODataV1GetAllEnabled());
+        }
+
+        // /api/v1/Packages/$count
+        [HttpGet]
+        public IHttpActionResult GetCount(ODataQueryOptions<V1FeedPackage> options)
+        {
+            _telemetryService.TrackApiRequest("/api/v1/Packages/$count");
+            return Get(options, _featureFlagService.IsODataV1GetAllCountEnabled())
+                .FormattedAsCountResult<V1FeedPackage>();
+        }
+
+        private IHttpActionResult Get(ODataQueryOptions<V1FeedPackage> options, bool isNonHijackEnabled)
+        {
+            if (!isNonHijackEnabled)
+            {
+                return DeprecatedRequest(Strings.ODataDisabled);
+            }
+
             if (!ODataQueryVerifier.AreODataOptionsAllowed(options, ODataQueryVerifier.V1Packages,
                 _configurationService.Current.IsODataFilterEnabled, nameof(Get)))
             {
                 return BadRequest(ODataQueryVerifier.GetValidationFailedMessage(options));
             }
+
+            bool result = TryShouldIgnoreOrderById(options, out var shouldIgnoreOrderById);
+
+            if (!result)
+            {
+                return BadRequest("Invalid OrderBy parameter");
+            }
+
             var queryable = GetAll()
                             .Where(p => !p.IsPrerelease && p.PackageStatusKey == PackageStatus.Available)
                             .Where(SemVerLevelKey.IsUnknownPredicate())
                             .WithoutSortOnColumn(Version)
-                            .WithoutSortOnColumn(Id, ShouldIgnoreOrderById(options))
+                            .WithoutSortOnColumn(Id, shouldIgnoreOrderById)
                             .ToV1FeedPackageQuery(_configurationService.GetSiteRoot(UseHttps()));
 
             return TrackedQueryResult(options, queryable, MaxPageSize, customQuery: true);
         }
 
-        // /api/v1/Packages/$count
-        [HttpGet]
-        [CacheOutput(NoCache = true)]
-        public IHttpActionResult GetCount(ODataQueryOptions<V1FeedPackage> options)
-        {
-            return Get(options).FormattedAsCountResult<V1FeedPackage>();
-        }
-
         // /api/v1/Packages(Id=,Version=)
         [HttpGet]
-        [ODataCacheOutput(
-            ODataCachedEndpoint.GetSpecificPackage,
-            serverTimeSpan: ODataCacheConfiguration.DefaultGetByIdAndVersionCacheTimeInSeconds,
-            Private = true,
-            ClientTimeSpan = ODataCacheConfiguration.DefaultGetByIdAndVersionCacheTimeInSeconds)]
         public async Task<IHttpActionResult> Get(ODataQueryOptions<V1FeedPackage> options, string id, string version)
         {
-            var result = await GetCore(options, id, version, return404NotFoundWhenNoResults: true);
+            _telemetryService.TrackApiRequest("/api/v1/Packages(Id=,Version=)");
+            var result = await GetCoreAsync(
+                options,
+                id,
+                version,
+                return404NotFoundWhenNoResults: true,
+                isNonHijackEnabled: _featureFlagService.IsODataV1GetSpecificNonHijackedEnabled());
             return result.FormattedAsSingleResult<V1FeedPackage>();
         }
 
         // /api/v1/FindPackagesById()?id=
         [HttpGet]
         [HttpPost]
-        [ODataCacheOutput(
-            ODataCachedEndpoint.FindPackagesById,
-            serverTimeSpan: ODataCacheConfiguration.DefaultGetByIdAndVersionCacheTimeInSeconds,
-            Private = true,
-            ClientTimeSpan = ODataCacheConfiguration.DefaultGetByIdAndVersionCacheTimeInSeconds)]
         public async Task<IHttpActionResult> FindPackagesById(ODataQueryOptions<V1FeedPackage> options, [FromODataUri]string id)
         {
-            return await GetCore(options, id, version: null, return404NotFoundWhenNoResults: false);
+            _telemetryService.TrackApiRequest("/api/v1/FindPackagesById()?id=");
+            return await FindPackagesByIdAsync(
+                options,
+                id,
+                _featureFlagService.IsODataV1FindPackagesByIdNonHijackedEnabled());
         }
 
         // /api/v1/FindPackagesById()/$count?id=
         [HttpGet]
-        [ODataCacheOutput(
-            ODataCachedEndpoint.FindPackagesByIdCount,
-            serverTimeSpan: ODataCacheConfiguration.DefaultFindPackagesByIdCountCacheTimeInSeconds,
-            NoCache = true)]
-        public async Task<IHttpActionResult> FindPackagesByIdCount(ODataQueryOptions<V1FeedPackage> options, [FromODataUri]string id)
+        public async Task<IHttpActionResult> FindPackagesByIdCount(ODataQueryOptions<V1FeedPackage> options, [FromODataUri] string id)
         {
-            var result = await FindPackagesById(options, id);
-            return result.FormattedAsCountResult<V1FeedPackage>();
+            _telemetryService.TrackApiRequest("/api/v1/FindPackagesById()/$count?id=");
+            return (await FindPackagesByIdAsync(
+                options,
+                id,
+                _featureFlagService.IsODataV1FindPackagesByIdCountNonHijackedEnabled()))
+                .FormattedAsCountResult<V1FeedPackage>();
         }
 
-        private async Task<IHttpActionResult> GetCore(ODataQueryOptions<V1FeedPackage> options, string id, string version, bool return404NotFoundWhenNoResults)
+        private async Task<IHttpActionResult> FindPackagesByIdAsync(
+            ODataQueryOptions<V1FeedPackage> options,
+            string id,
+            bool isNonHijackEnabled)
+        {
+            return await GetCoreAsync(
+                options,
+                id,
+                version: null,
+                return404NotFoundWhenNoResults: false,
+                isNonHijackEnabled: isNonHijackEnabled);
+        }
+
+        private async Task<IHttpActionResult> GetCoreAsync(
+            ODataQueryOptions<V1FeedPackage> options,
+            string id,
+            string version,
+            bool return404NotFoundWhenNoResults,
+            bool isNonHijackEnabled)
         {
             var packages = GetAll()
                 .Include(p => p.PackageRegistration)
@@ -176,11 +211,18 @@ namespace NuGetGallery.Controllers
                     customQuery = true;
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (isNonHijackEnabled)
             {
-                // Swallowing Exception intentionally. If *anything* goes wrong in search, just fall back to the database.
-                // We don't want to break package restores. We do want to know if this happens, so here goes:
+                // Swallowing exception intentionally if we are allowing a fallback to database. If non-hijacked
+                // queries are disabled, let the exception bubble out and the client will retry.
                 QuietLog.LogHandledException(ex);
+            }
+
+            // If we've reached this point, the hijack to the search service has failed or is not applicable. If
+            // non-hijacked queries are disabled, stop here.
+            if (!isNonHijackEnabled)
+            {
+                return DeprecatedRequest(Strings.ODataParametersDisabled);
             }
 
             if (return404NotFoundWhenNoResults && !packages.Any())
@@ -197,6 +239,7 @@ namespace NuGetGallery.Controllers
         [HttpGet]
         public IHttpActionResult GetPropertyFromPackages(string propertyName, string id, string version)
         {
+            _telemetryService.TrackApiRequest("/api/v1/Packages(Id=,Version=)/propertyName");
             switch (propertyName.ToLowerInvariant())
             {
                 case "id": return Ok(id);
@@ -209,14 +252,40 @@ namespace NuGetGallery.Controllers
         // /api/v1/Search()?searchTerm=&targetFramework=&includePrerelease=
         [HttpGet]
         [HttpPost]
-        [ODataCacheOutput(
-            ODataCachedEndpoint.Search,
-            serverTimeSpan: ODataCacheConfiguration.DefaultSearchCacheTimeInSeconds,
-            ClientTimeSpan = ODataCacheConfiguration.DefaultSearchCacheTimeInSeconds)]
         public async Task<IHttpActionResult> Search(
             ODataQueryOptions<V1FeedPackage> options,
             [FromODataUri]string searchTerm = "",
             [FromODataUri]string targetFramework = "")
+        {
+            _telemetryService.TrackApiRequest("/api/v1/Search()?searchTerm=&targetFramework=&includePrerelease=");
+            return await SearchAsync(
+                options,
+                searchTerm,
+                targetFramework,
+                _featureFlagService.IsODataV1SearchNonHijackedEnabled());
+        }
+
+        // /api/v1/Search()/$count?searchTerm=&targetFramework=&includePrerelease=
+        [HttpGet]
+        public async Task<IHttpActionResult> SearchCount(
+            ODataQueryOptions<V1FeedPackage> options,
+            [FromODataUri]string searchTerm = "",
+            [FromODataUri]string targetFramework = "")
+        {
+            _telemetryService.TrackApiRequest("/api/v1/Search()/$count?searchTerm=&targetFramework=&includePrerelease=");
+            return (await SearchAsync(
+                options,
+                searchTerm,
+                targetFramework,
+                _featureFlagService.IsODataV1SearchCountNonHijackedEnabled()))
+                .FormattedAsCountResult<V1FeedPackage>();
+        }
+
+        private async Task<IHttpActionResult> SearchAsync(
+            ODataQueryOptions<V1FeedPackage> options,
+            string searchTerm,
+            string targetFramework,
+            bool isNonHijackEnabled)
         {
             // Handle OData-style |-separated list of frameworks.
             string[] targetFrameworkList = (targetFramework ?? "").Split(new[] { '\'', '|' }, StringSplitOptions.RemoveEmptyEntries);
@@ -252,7 +321,7 @@ namespace NuGetGallery.Controllers
                 packages,
                 searchTerm,
                 targetFramework,
-                includePrerelease: false, 
+                includePrerelease: false,
                 semVerLevel: null);
 
             // Packages provided by search service (even when not hijacked)
@@ -283,6 +352,11 @@ namespace NuGetGallery.Controllers
                 customQuery = true;
             }
 
+            if (!isNonHijackEnabled)
+            {
+                return DeprecatedRequest(Strings.ODataParametersDisabled);
+            }
+
             if (!ODataQueryVerifier.AreODataOptionsAllowed(options, ODataQueryVerifier.V1Search,
                 _configurationService.Current.IsODataFilterEnabled, nameof(Search)))
             {
@@ -294,23 +368,7 @@ namespace NuGetGallery.Controllers
             return TrackedQueryResult(options, queryable, MaxPageSize, customQuery);
         }
 
-        // /api/v1/Search()/$count?searchTerm=&targetFramework=&includePrerelease=
         [HttpGet]
-        [ODataCacheOutput(
-            ODataCachedEndpoint.Search,
-            serverTimeSpan: ODataCacheConfiguration.DefaultSearchCacheTimeInSeconds,
-            ClientTimeSpan = ODataCacheConfiguration.DefaultSearchCacheTimeInSeconds)]
-        public async Task<IHttpActionResult> SearchCount(
-            ODataQueryOptions<V1FeedPackage> options,
-            [FromODataUri]string searchTerm = "",
-            [FromODataUri]string targetFramework = "")
-        {
-            var searchResults = await Search(options, searchTerm, targetFramework);
-            return searchResults.FormattedAsCountResult<V1FeedPackage>();
-        }
-
-        [HttpGet]
-        [CacheOutput(NoCache = true)]
         public virtual HttpResponseMessage SimulateError([FromUri] string type = "Exception")
         {
             if (!Enum.TryParse<SimulatedErrorType>(type, out var parsedType))

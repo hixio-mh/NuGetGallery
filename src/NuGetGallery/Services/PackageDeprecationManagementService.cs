@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -43,12 +43,14 @@ namespace NuGetGallery
             User currentUser,
             string id,
             IReadOnlyCollection<string> versions, 
+            string auditReason,
             bool isLegacy = false, 
             bool hasCriticalBugs = false, 
             bool isOther = false, 
             string alternatePackageId = null, 
             string alternatePackageVersion = null, 
-            string message = null)
+            string message = null,
+            ListedVerb listedVerb = ListedVerb.Unchanged)
         {
             var status = PackageDeprecationStatus.NotDeprecated;
 
@@ -94,7 +96,6 @@ namespace NuGetGallery
             var registration = packages.FirstOrDefault()?.PackageRegistration;
             if (registration == null)
             {
-                // This should only happen if someone hacks the form or if the package is deleted while the user is filling out the form.
                 return new UpdateDeprecationError(
                     HttpStatusCode.NotFound,
                     string.Format(Strings.DeprecatePackage_MissingRegistration, id));
@@ -127,7 +128,7 @@ namespace NuGetGallery
                     if (alternatePackage == null)
                     {
                         return new UpdateDeprecationError(
-                            HttpStatusCode.NotFound,
+                            HttpStatusCode.BadRequest,
                             string.Format(Strings.DeprecatePackage_NoAlternatePackage, alternatePackageId, alternatePackageVersion));
                     }
                 }
@@ -137,7 +138,7 @@ namespace NuGetGallery
                     if (alternatePackageRegistration == null)
                     {
                         return new UpdateDeprecationError(
-                            HttpStatusCode.NotFound,
+                            HttpStatusCode.BadRequest,
                             string.Format(Strings.DeprecatePackage_NoAlternatePackageRegistration, alternatePackageId));
                     }
                 }
@@ -147,10 +148,9 @@ namespace NuGetGallery
             foreach (var version in versions)
             {
                 var normalizedVersion = NuGetVersionFormatter.Normalize(version);
-                var package = packages.SingleOrDefault(v => v.NormalizedVersion == normalizedVersion);
+                var package = packages.SingleOrDefault(v => StringComparer.OrdinalIgnoreCase.Equals(v.NormalizedVersion, normalizedVersion));
                 if (package == null)
                 {
-                    // This should only happen if someone hacks the form or if a version of the package is deleted while the user is filling out the form.
                     return new UpdateDeprecationError(
                         HttpStatusCode.NotFound,
                         string.Format(Strings.DeprecatePackage_MissingVersion, id));
@@ -174,7 +174,9 @@ namespace NuGetGallery
                 alternatePackageRegistration,
                 alternatePackage,
                 customMessage,
-                currentUser);
+                currentUser,
+                listedVerb,
+                auditReason);
 
             return null;
         }

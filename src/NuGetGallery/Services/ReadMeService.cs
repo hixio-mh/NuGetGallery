@@ -9,35 +9,37 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
-using CommonMark;
-using CommonMark.Syntax;
+using NuGet.Packaging;
 using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
     internal class ReadMeService : IReadMeService
     {
-        private static readonly TimeSpan RegexTimeout = TimeSpan.FromMinutes(1);
-        private static readonly Regex EncodedBlockQuotePattern = new Regex("^ {0,3}&gt;", RegexOptions.Multiline, RegexTimeout);
-        private static readonly Regex CommonMarkLinkPattern = new Regex("<a href=([\"\']).*?\\1", RegexOptions.None, RegexTimeout);
 
         internal const string TypeUrl = "Url";
         internal const string TypeFile = "File";
         internal const string TypeWritten = "Written";
 
-        internal const int MaxMdLengthBytes = 8000;
+        internal const int MaxAllowedReadmeBytes = GalleryConstants.MaxFileLengthBytes;
         private const string UrlHostRequirement = "raw.githubusercontent.com";
 
         private static readonly TimeSpan UrlTimeout = TimeSpan.FromSeconds(10);
         private readonly IEntitiesContext _entitiesContext;
         private readonly IPackageFileService _packageFileService;
+        private readonly IMarkdownService _markdownService;
+        private readonly ICoreReadmeFileService _coreReadmeFileService;
 
         public ReadMeService(
             IPackageFileService packageFileService,
-            IEntitiesContext entitiesContext)
+            IEntitiesContext entitiesContext,
+            IMarkdownService markdownService,
+            ICoreReadmeFileService coreReadmeFileService)
         {
             _packageFileService = packageFileService ?? throw new ArgumentNullException(nameof(packageFileService));
             _entitiesContext = entitiesContext ?? throw new ArgumentNullException(nameof(entitiesContext));
+            _markdownService = markdownService ?? throw new ArgumentNullException(nameof(markdownService));
+            _coreReadmeFileService = coreReadmeFileService ?? throw new ArgumentNullException(nameof(coreReadmeFileService));
         }
 
         /// <summary>
@@ -73,10 +75,10 @@ namespace NuGetGallery
         /// </summary>
         /// <param name="readMeRequest">Request object.</param>
         /// <returns>HTML from markdown conversion.</returns>
-        public async Task<RenderedReadMeResult> GetReadMeHtmlAsync(ReadMeRequest readMeRequest, Encoding encoding)
+        public async Task<RenderedMarkdownResult> GetReadMeHtmlAsync(ReadMeRequest readMeRequest, Encoding encoding)
         {
             var markdown = await GetReadMeMdAsync(readMeRequest, encoding);
-            return GetReadMeHtml(markdown);
+            return _markdownService.GetHtmlFromMarkdown(markdown);
         }
 
         /// <summary>
@@ -84,18 +86,44 @@ namespace NuGetGallery
         /// </summary>
         /// <param name="package">Package entity associated with the ReadMe.</param>
         /// <returns>ReadMe converted to HTML.</returns>
-        public async Task<RenderedReadMeResult> GetReadMeHtmlAsync(Package package)
+        public async Task<RenderedMarkdownResult> GetReadMeHtmlAsync(Package package)
         {
             var readMeMd = await GetReadMeMdAsync(package);
-            var result = new RenderedReadMeResult
+            var result = new RenderedMarkdownResult
             {
                 Content = readMeMd,
-                ImagesRewritten = false
+                ImagesRewritten = false,
+                ImageSourceDisallowed = false, 
+                IsMarkdigMdSyntaxHighlightEnabled = false
             };
 
             return string.IsNullOrEmpty(readMeMd) ?
                 result :
-                GetReadMeHtml(readMeMd);
+                _markdownService.GetHtmlFromMarkdown(readMeMd);
+        }
+
+        /// <summary>
+        /// Get the converted HTML from the package with Readme markdown.
+        /// </summary>
+        /// <param name="readmeFileName">The path of Readme markdown.</param>
+        /// <param name="packageArchiveReader">
+        /// The <see cref="PackageArchiveReader"/> instance providing the package metadata.
+        /// </param>
+        /// <returns>ReadMe converted to HTML.</returns>
+        public async Task<RenderedMarkdownResult> GetReadMeHtmlAsync(string readmeFileName, PackageArchiveReader packageArchiveReader, Encoding encoding)
+        {
+            var readmeMd = await GetReadMeMdAsync(readmeFileName, packageArchiveReader, encoding);
+            var result = new RenderedMarkdownResult
+            {
+                Content = readmeMd,
+                ImagesRewritten = false,
+                ImageSourceDisallowed = false,
+                IsMarkdigMdSyntaxHighlightEnabled = false
+            };
+
+            return string.IsNullOrEmpty(readmeMd) ?
+                result :
+                _markdownService.GetHtmlFromMarkdown(readmeMd);
         }
 
         /// <summary>
@@ -107,10 +135,34 @@ namespace NuGetGallery
         {
             if (package.HasReadMe)
             {
-                return await _packageFileService.DownloadReadMeMdFileAsync(package);
+                if (package.HasEmbeddedReadme)
+                {
+                    return await _coreReadmeFileService.DownloadReadmeFileAsync(package);
+                }
+                else
+                {
+                    return await _packageFileService.DownloadReadMeMdFileAsync(package);
+                }
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Get content of Readme markdown.
+        /// </summary>
+        /// <param name="readmeFileName">Package entity associated with the ReadMe.</param>
+        /// <param name="packageArchiveReader">
+        /// The <see cref="PackageArchiveReader"/> instance providing the package metadata.
+        /// </param>
+        /// <returns>ReadMe markdown from package metadata.</returns>
+        private async Task<string> GetReadMeMdAsync(string readmeFileName, PackageArchiveReader packageArchiveReader, Encoding encoding)
+        {
+            using (var readmeFileStream = packageArchiveReader.GetStream(readmeFileName))
+            using (var streamReader = new StreamReader(readmeFileStream, encoding))
+            {
+                 return await streamReader.ReadToEndAsync();
+            }
         }
 
         /// <summary>
@@ -171,99 +223,6 @@ namespace NuGetGallery
         }
 
         /// <summary>
-        /// Get converted HTML for readme.md string content.
-        /// </summary>
-        /// <param name="readMeMd">ReadMe.md content.</param>
-        /// <returns>HTML content.</returns>
-        internal static RenderedReadMeResult GetReadMeHtml(string readMeMd)
-        {
-            var output = new RenderedReadMeResult()
-            {
-                ImagesRewritten = false,
-                Content = ""
-            };
-
-            // HTML encode markdown, except for block quotes, to block inline html.
-            var encodedMarkdown = EncodedBlockQuotePattern.Replace(HttpUtility.HtmlEncode(readMeMd), "> ");
-
-            var settings = CommonMarkSettings.Default.Clone();
-            settings.RenderSoftLineBreaksAsLineBreaks = true;
-
-            // Parse executes CommonMarkConverter's ProcessStage1 and ProcessStage2.
-            var document = CommonMarkConverter.Parse(encodedMarkdown, settings);
-            foreach (var node in document.AsEnumerable())
-            {
-                if (node.IsOpening)
-                {
-                    var block = node.Block;
-                    if (block != null)
-                    {
-                        switch (block.Tag)
-                        {
-                            // Demote heading tags so they don't overpower expander headings.
-                            case BlockTag.AtxHeading:
-                            case BlockTag.SetextHeading:
-                                var level = (byte)Math.Min(block.Heading.Level + 1, 6);
-                                block.Heading = new HeadingData(level);
-                                break;
-
-                            // Decode preformatted blocks to prevent double encoding.
-                            // Skip BlockTag.BlockQuote, which are partially decoded upfront.
-                            case BlockTag.FencedCode:
-                            case BlockTag.IndentedCode:
-                                if (block.StringContent != null)
-                                {
-                                    var content = block.StringContent.TakeFromStart(block.StringContent.Length);
-                                    var unencodedContent = HttpUtility.HtmlDecode(content);
-                                    block.StringContent.Replace(unencodedContent, 0, unencodedContent.Length);
-                                }
-                                break;
-                        }
-                    }
-
-                    var inline = node.Inline;
-                    if (inline != null)
-                    {
-                        if (inline.Tag == InlineTag.Link)
-                        {
-                            // Allow only http or https links in markdown. Transform link to https for known domains.
-                            if (!PackageHelper.TryPrepareUrlForRendering(inline.TargetUrl, out string readyUriString))
-                            {
-                                inline.TargetUrl = string.Empty;
-                            }
-                            else
-                            {
-                                inline.TargetUrl = readyUriString;
-                            }
-                        }
-
-                        else if (inline.Tag == InlineTag.Image)
-                        {
-                            if (!PackageHelper.TryPrepareUrlForRendering(inline.TargetUrl, out string readyUriString, rewriteAllHttp: true))
-                            {
-                                inline.TargetUrl = string.Empty;
-                            }
-                            else
-                            {
-                                output.ImagesRewritten = output.ImagesRewritten || (inline.TargetUrl != readyUriString);
-                                inline.TargetUrl = readyUriString;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // CommonMark.Net does not support link attributes, so manually inject nofollow.
-            using (var htmlWriter = new StringWriter())
-            {
-                CommonMarkConverter.ProcessStage3(document, htmlWriter, settings);
-
-                output.Content = CommonMarkLinkPattern.Replace(htmlWriter.ToString(), "$0" + " rel=\"nofollow\"").Trim();
-                return output;
-            }
-        }
-
-        /// <summary>
         /// Get readme.md content from a ReadMeRequest object.
         /// </summary>
         /// <param name="readMeRequest">ReadMe request from Verify or Edit package page.</param>
@@ -278,10 +237,10 @@ namespace NuGetGallery
 
             if (TypeWritten.Equals(readMeType, StringComparison.InvariantCultureIgnoreCase))
             {
-                if (encoding.GetByteCount(readMeRequest.SourceText) > MaxMdLengthBytes)
+                if (encoding.GetByteCount(readMeRequest.SourceText) > MaxAllowedReadmeBytes)
                 {
                     throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture,
-                        Strings.ReadMeMaxLengthExceeded, MaxMdLengthBytes));
+                        Strings.ReadMeMaxLengthExceeded, MaxAllowedReadmeBytes));
                 }
                 return readMeRequest.SourceText;
             }
@@ -315,7 +274,7 @@ namespace NuGetGallery
 
             using (var readMeMdStream = readMeMdPostedFile.InputStream)
             {
-                return await ReadMaxAsync(readMeMdStream, MaxMdLengthBytes, encoding);
+                return await ReadMaxAsync(readMeMdStream, MaxAllowedReadmeBytes, encoding);
             }
         }
 
@@ -335,7 +294,7 @@ namespace NuGetGallery
             {
                 using (var httpStream = await client.GetStreamAsync(readMeMdUrl))
                 {
-                    return await ReadMaxAsync(httpStream, MaxMdLengthBytes, encoding);
+                    return await ReadMaxAsync(httpStream, MaxAllowedReadmeBytes, encoding);
                 }
             }
         }
@@ -365,7 +324,7 @@ namespace NuGetGallery
             return encoding.GetString(buffer).Trim('\0');
         }
 
-        private static readonly Regex NewLineRegex = new Regex(@"\n|\r\n");
+        private static readonly Regex NewLineRegex = RegexEx.CreateWithTimeout(@"\n|\r\n", RegexOptions.None);
 
         private static string NormalizeNewLines(string content)
         {

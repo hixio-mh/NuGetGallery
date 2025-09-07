@@ -38,10 +38,10 @@
         var validatorErrorClass = 'help-block';
         $.validator.setDefaults({
             highlight: function (element) {
-                $(element).closest('.form-group').addClass('has-error');
+                $(element).closest('.form-group').addClass('has-error-brand');
             },
             unhighlight: function (element) {
-                $(element).closest('.form-group').removeClass('has-error');
+                $(element).closest('.form-group').removeClass('has-error-brand');
             },
             errorElement: 'span',
             errorClass: validatorErrorClass,
@@ -305,7 +305,7 @@
             if (e) {
                 e.stopPropagation();
                 e.preventDefault();
-            }            
+            }
             return false;
         }
 
@@ -377,12 +377,10 @@
     nuget.addAjaxAntiForgeryToken = function (data) {
         var $tokenKey = "__RequestVerificationToken";
         var $field = $("#AntiForgeryForm input[name=__RequestVerificationToken]");
-        if (data instanceof FormData)
-        {
+        if (data instanceof FormData) {
             data.append($tokenKey, $field.val());
         }
-        else
-        {
+        else {
             data["__RequestVerificationToken"] = $field.val();
         }
         return data;
@@ -462,52 +460,173 @@
         }
     };
 
-    nuget.enableUsabilla = function (obfuscatedPath) {
-        // If there is an obfuscated path, hook into the outgoing AJAX request containing the feedback and obfuscate
-        // the URL data. This approach was provided by the Usabilla technical support.
-        if (obfuscatedPath) {
-            var obfuscatedUrl = document.createElement('a');
-            obfuscatedUrl.href = window.location.href;
-            if (obfuscatedPath.substring(0, 1) != "/") {
-                obfuscatedUrl.pathname = "/" + obfuscatedPath;
-            } else {
-                obfuscatedUrl.pathname = obfuscatedPath;
+    nuget.setPopovers = function () {
+        setPopoversInternal(this, rightWithVerticalFallback);
+    }
+
+    // Search filter keys to store. Correspond to search filters on Packages page.
+    const searchFilterParamNames = [
+        "frameworks",
+        "tfms",
+        "packagetype",
+        "prerel",
+        "frameworkFilterMode",
+        "includeComputedFrameworks",
+    ];
+
+    const searchFilterStorageKey = "nuget-search-filters";
+
+    function getStoredSearchFilterParams() {
+        try {
+            const value = localStorage.getItem(searchFilterStorageKey);
+            if (value) {
+                const searchParams = JSON.parse(value);
+                if (typeof searchParams === 'object' && Object.keys(searchParams).length > 0) {
+                    return searchParams;
+                }
             }
-
-            window.usabilla_live("setEventCallback", function (category, action, label, value, eventdata) {
-                if (action != "Feedback:Open") {
-                    return;
-                }
-
-                function sendWithObfuscation(vData) {
-                    if (vData) {
-                        var data = JSON.parse(vData);
-                        data.url = obfuscatedUrl.href;
-                        vData = JSON.stringify(data);
-                        arguments[0] = vData;
-                    }
-                    realSend.apply(this, arguments);
-                }
-
-                var realSend = XMLHttpRequest.prototype.send;
-                var ub_window = document.getElementById("lightningjs-frame-usabilla_live_feedback").contentWindow;
-                ub_window.XMLHttpRequest.prototype.send = sendWithObfuscation;
-                if (window.XDomainRequest) {
-                    realSend = XDomainRequest.prototype.send;
-                    ub_window.XDomainRequest.prototype.send = sendWithObfuscation;
-                }
-            });
+        } catch (e) {
+            // Ignore parse/storage errors
         }
 
-        // Hide the default feedback button.
-        window.usabilla_live("hide");
+        return undefined;
+    }
 
-        // Wire-up and show the custom feedback button.
-        document.getElementById("usbl-integrated-button").addEventListener("click", function (event) {
-            event.preventDefault();
-            window.usabilla_live("click");
+    function addSearchFilterInputsToSimpleSearchForm() {
+        const searchParams = getStoredSearchFilterParams();
+        if (!searchParams) {
+            return;
+        }
+
+        const searchForm = $("#form-to-add-local-search-filters"); // MUST MATCH UrlHelperExtensions.cs
+        if (!searchForm.length) {
+            return;
+        }
+
+        // Update existing input elements or create new hidden ones
+        for (const key in searchParams) {
+            let input = searchForm.find('input[name="' + key + '"]');
+            if (input.length) {
+                input.val(searchParams[key]);
+            } else {
+                $('<input>', {
+                    type: 'hidden',
+                    id: key,
+                    name: key,
+                    value: searchParams[key]
+                }).appendTo(searchForm);
+            }
+        }
+    }
+
+    nuget.resetSearchFilterParams = function () {
+        try {
+            localStorage.removeItem(searchFilterStorageKey);
+        } catch (e) {
+        }
+    }
+
+    nuget.saveSearchFilterParams = function (url) {
+        // Parse URL like "/packages?tfms=net8.0&packagetype=dotnettool&prerel=false"
+        // and store specific params for later reuse.
+        const parser = new URL(url);
+        const params = {};
+        for (const [key, value] of parser.searchParams.entries()) {
+            if (searchFilterParamNames.indexOf(key) !== -1 && value !== '') {
+                params[key] = value;
+            }
+        }
+
+        // Save to localStorage as a single object, or clear storage if no params
+        if (Object.keys(params).length > 0) {
+            try {
+                localStorage.setItem(searchFilterStorageKey, JSON.stringify(params));
+                return;
+            } catch (e) {
+                // Ignore storage errors (e.g., quota exceeded)
+            }
+        }
+
+        // We are here if we failed to save or need to remove "empty" params.
+        nuget.resetSearchFilterParams();
+    }
+
+    nuget.updateSearchLinksWithSavedParams = function () {
+        // Update all specially marked <a> elements to include localy stored search params.
+        const searchParams = getStoredSearchFilterParams();
+        if (searchParams) {
+            const links = $('a.link-to-add-local-search-filters'); // MUST MATCH UrlHelperExtensions.cs
+            links.each(function () {
+                const url = new URL(this.href);
+                $.each(searchParams, function (key, value) {
+                    url.searchParams.set(key, value);
+                });
+                this.href = url.href;
+            });
+        }
+    }
+
+    function rightWithVerticalFallback(popoverElement, ownerElement) {
+        // Both numbers below are in CSS pixels.
+        const MinSpaceOnRight = 150;
+        const MinSpaceOnTop = 100;
+
+        const ownerBoundingBox = ownerElement.getBoundingClientRect();
+        const spaceOnRight = window.innerWidth - ownerBoundingBox.right;
+        if (spaceOnRight > MinSpaceOnRight) {
+            return 'right';
+        }
+        const spaceOnTop = ownerBoundingBox.top;
+        if (spaceOnTop > MinSpaceOnTop) {
+            return 'top';
+        }
+
+        return 'bottom';
+    }
+
+    function setPopoversInternal(element, placement) {
+        var popoverElement = $(element);
+        var popoverElementDom = element;
+        var originalLabel = popoverElementDom.ariaLabel;
+        var popoverHideTimeMS = 2000;
+        var popoverFadeTimeMS = 200;
+
+        var popoverOptions = { trigger: 'hover', container: 'body' };
+        if (placement) {
+            popoverOptions.placement = placement;
+        }
+
+        popoverElement.popover(popoverOptions);
+        popoverElement.click(popoverShowAndHide);
+        popoverElement.focus(popoverShowAndHide);
+        popoverElement.keyup(function (event) {
+            // normalize keycode for browser compatibility
+            var code = event.which || event.keyCode || event.charCode;
+
+            // This is the keycode for the 'Esc' key
+            if (code === 27) {
+                popoverElement.popover('hide');
+            }
         });
-        document.getElementById("usabilla-button").style.display = "block";
+
+        function popoverShowAndHide() {
+            popoverElement.popover('show');
+
+            // Windows Narrator does not announce popovers' content. See: https://github.com/twbs/bootstrap/issues/18618
+            // We can force Narrator to announce the popover's content by "flashing" the element's ARIA label.
+            popoverElementDom.ariaLabel = "";
+
+            setTimeout(function () {
+                popoverElement.popover('hide');
+
+                // We need to restore the element's original ARIA label.
+                // Wait 0.15 seconds for the popover to fade away first.
+                // Otherwise, the screen reader will re-announce the popover's content.
+                setTimeout(function () {
+                    popoverElementDom.ariaLabel = originalLabel;
+                }, popoverFadeTimeMS);
+            }, popoverHideTimeMS);
+        }
     };
 
     window.nuget = nuget;
@@ -518,6 +637,29 @@
     });
 
     initializeJQueryValidator();
+
+    // Add listener to the theme selector
+    var themeSelector = document.getElementById("select-option-theme");
+    if (themeSelector != null) {
+        themeSelector.addEventListener("change", () => {
+            if (themeSelector.value === "system") {
+                localStorage.setItem("theme", "system");
+                document.body.setAttribute('data-theme', defaultTheme);
+                document.getElementById("user-prefered-theme").textContent = "System";
+            }
+            else {
+                localStorage.setItem("theme", themeSelector.value);
+                document.body.setAttribute('data-theme', themeSelector.value);
+                document.getElementById("user-prefered-theme").textContent = themeSelector.value == "light" ? "Light" : "Dark";
+            }
+            window.nuget.sendMetric("ThemeChanged", 1, { "ThemeChanged": themeSelector.value });
+        })
+
+        // Set the theme selector to the user's preferred theme
+        var theme = localStorage.getItem("theme")
+        themeSelector.value = theme;
+        document.getElementById("user-prefered-theme").textContent = theme.charAt(0).toUpperCase() + theme.slice(1);
+    }
 
     $(function () {
         // Enable the POST links. These are links that perform a POST via a form instead of traditional navigation.
@@ -549,55 +691,42 @@
         });
 
         // Select the first input that has an error.
-        $('.has-error')
+        $('.has-error-brand')
             .find('input,textarea,select')
             .filter(':visible:first')
             .trigger('focus');
 
-        // Handle Google analytics tracking event on specific links.
-        var emitClickEvent = function (e, emitDirectly) {
-            if (!window.nuget.isGaAvailable()) {
+        // Handle Application Insights tracking event on specific links.
+        var emitClickEvent = function (e) {
+            if (!window.nuget.isAiAvailable()) {
                 return;
             }
 
             var href = $(this).attr('href');
             var category = $(this).data().track;
+
             var trackValue = $(this).data().trackValue;
+            if (typeof trackValue === 'undefined') {
+                trackValue = 1;
+            }
+
             if (href && category) {
-                if (emitDirectly) {
-                    window.nuget.sendAnalyticsEvent(category, 'click', href, trackValue);
-                } else {
-                    // This path is used when the click will result in a page transition. Because of this we need to
-                    // emit telemetry in a special way so that the event gets out before the page transition occurs.
-                    e.preventDefault();
-                    window.nuget.sendAnalyticsEvent(category, 'click', href, trackValue, {
-                        'transport': 'beacon',
-                        'hitCallback': window.nuget.createFunctionWithTimeout(function () {
-                            document.location = href;
-                        })
-                    });
-                }
+                window.nuget.sendMetric('BrowserClick', trackValue, {
+                    href: href,
+                    category: category
+                });
             }
         };
         $.each($('a[data-track]'), function () {
             $(this).on('mouseup', function (e) {
                 if (e.which === 2) { // Middle-mouse click
-                    emitClickEvent.call(this, e, true);
+                    emitClickEvent.call(this, e);
                 }
             });
             $(this).on('click', function (e) {
-                emitClickEvent.call(this, e, e.altKey || e.ctrlKey || e.metaKey);
+                emitClickEvent.call(this, e);
             });
         });
-
-        // Show elements that require ClickOnce
-        (function () {
-            var userAgent = window.navigator.userAgent.toUpperCase();
-            var hasNativeDotNet = userAgent.indexOf('.NET CLR 3.5') >= 0;
-            if (hasNativeDotNet) {
-                $('.no-clickonce').removeClass('no-clickonce');
-            }
-        })();
 
         // Don't close the dropdown on click events inside of the dropdown.
         $(document).on('click', '.dropdown-menu', function (e) {
@@ -635,5 +764,29 @@
                 skippedToContent.focus();
             }
         });
+
+        window.WcpConsent && WcpConsent.init("en-US", "cookie-banner", function (err, _siteConsent) {
+            if (err !== undefined) {
+                console.log("Error initializing WcpConsent: ", err);
+            } else {
+                window.nuget.wcpSiteConsent = _siteConsent;  // wcpSiteConsent is used to get the current consent
+            }
+        });
+
+        if (window.nuget.wcpSiteConsent && window.nuget.wcpSiteConsent.isConsentRequired) {
+            $("#footer-privacy-policy-link").after(" - <a class='button' href = 'javascript: window.nuget.wcpSiteConsent.manageConsent()' > Manage Cookies</a >")
+        }
+
+        addSearchFilterInputsToSimpleSearchForm();
+        window.nuget.updateSearchLinksWithSavedParams();
+
+    });
+    // For tooltip hover and focus - using event delegation for Knockout compatibility
+    $(document).on('mouseenter focusin', '.tooltip-target', function () {
+        $(this).find('.tooltip-wrapper').addClass('show');
+    });
+
+    $(document).on('mouseleave focusout', '.tooltip-target', function () {
+        $(this).find('.tooltip-wrapper').removeClass('show');
     });
 }());

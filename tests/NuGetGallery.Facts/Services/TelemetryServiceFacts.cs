@@ -61,7 +61,7 @@ namespace NuGetGallery
                     };
 
                     yield return new object[] { "DownloadJsonRefreshDuration",
-                        (TrackAction)(s => s.TrackDownloadJsonRefreshDuration(0))
+                        (TrackAction)(s => s.TrackDownloadJsonRefreshDuration(TimeSpan.FromMilliseconds(0)))
                     };
 
                     yield return new object[] { "DownloadCountDecreasedDuringRefresh",
@@ -112,6 +112,10 @@ namespace NuGetGallery
                         (TrackAction)(s => s.TrackPackageDelete(package, isHardDelete: true))
                     };
 
+                    yield return new object[] { "PackagesUpdateListed",
+                        (TrackAction)(s => s.TrackPackagesUpdateListed(new[] { package }, listed: true))
+                    };
+
                     yield return new object[] { "PackageReupload",
                         (TrackAction)(s => s.TrackPackageReupload(package))
                     };
@@ -133,7 +137,7 @@ namespace NuGetGallery
                             packages,
                             PackageDeprecationStatus.Legacy,
                             new PackageRegistration { Id = "alt" },
-                            new Package { PackageRegistration = new PackageRegistration { Id = "alt-2" }, NormalizedVersion = "1.2.3" }, true))
+                            new Package { PackageRegistration = new PackageRegistration { Id = "alt-2" }, NormalizedVersion = "1.2.3" }, true, false))
                     };
 
                     yield return new object[] { "CreatePackageVerificationKey",
@@ -150,6 +154,10 @@ namespace NuGetGallery
 
                     yield return new object[] { "PackagePushNamespaceConflict",
                         (TrackAction)(s => s.TrackPackagePushNamespaceConflictEvent(fakes.Package.Id, package.Version, fakes.User, identity))
+                    };
+
+                    yield return new object[] { "PackagePushOwnerlessNamespaceConflict",
+                        (TrackAction)(s => s.TrackPackagePushOwnerlessNamespaceConflictEvent(fakes.Package.Id, package.Version, fakes.User, identity))
                     };
 
                     yield return new object[] { "NewUserRegistration",
@@ -325,11 +333,42 @@ namespace NuGetGallery
                     };
 
                     yield return new object[] { "ABTestEnrollmentUpgraded",
-                        (TrackAction)(s => s.TrackABTestEnrollmentUpgraded(2, 42, 47))
+                        (TrackAction)(s => s.TrackABTestEnrollmentUpgraded(1, 2, 42, 47))
                     };
 
                     yield return new object[] { "ABTestEvaluated",
                         (TrackAction)(s => s.TrackABTestEvaluated("SearchPreview", true, true, 0, 20))
+                    };
+
+                    yield return new object[] { "PackagePushDisconnect",
+                        (TrackAction)(s => s.TrackPackagePushDisconnectEvent())
+                    };
+
+                    yield return new object[] { "SymbolPackagePushDisconnect",
+                        (TrackAction)(s => s.TrackSymbolPackagePushDisconnectEvent())
+                    };
+
+                    yield return new object[] { "VulnerabilitiesCacheRefreshDurationMs",
+                        (TrackAction)(s => s.TrackVulnerabilitiesCacheRefreshDuration(TimeSpan.FromMilliseconds(0)))
+                    };
+
+                    yield return new object[] { "InstanceUptimeInDays",
+                        (TrackAction)(s => s.TrackInstanceUptime(TimeSpan.FromSeconds(1)))
+                    };
+
+                    yield return new object[] { "ApiRequest",
+                        (TrackAction)(s => s.TrackApiRequest("SomeEndpoint")),
+                        true
+                    };
+
+                    yield return new object[] { "CreateSqlConnectionDurationMs",
+                        (TrackAction)(s => s.TrackSyncSqlConnectionCreationDuration().Dispose()),
+                        true
+                    };
+
+                    yield return new object[] { "CreateSqlConnectionDurationMs",
+                        (TrackAction)(s => s.TrackAsyncSqlConnectionCreationDuration().Dispose()),
+                        true
                     };
                 }
             }
@@ -337,15 +376,20 @@ namespace NuGetGallery
             [Fact]
             public void TrackEventNamesIncludesAllEvents()
             {
-                var expectedCount = typeof(TelemetryService.Events).GetFields().Length;
-                var actualCount = TrackMetricNames_Data.Count();
+                var eventNames = typeof(TelemetryService.Events)
+                    .GetFields()
+                    .Where(f => f.IsLiteral && !f.IsInitOnly && f.FieldType == typeof(string))
+                    .Select(f => (string)f.GetValue(null))
+                    .ToList();
 
-                Assert.Equal(expectedCount, actualCount);
+                var testedNames = new HashSet<string>(TrackMetricNames_Data.Select(element => (string)element[0]));
+
+                Assert.All(eventNames, name => testedNames.Contains(name));
             }
 
             [Theory]
             [MemberData(nameof(TrackMetricNames_Data))]
-            public void TrackMetricNames(string metricName, TrackAction track)
+            public void TrackMetricNames(string metricName, TrackAction track, bool isAggregatedMetric = false)
             {
                 // Arrange
                 var service = CreateService();
@@ -354,10 +398,20 @@ namespace NuGetGallery
                 track(service);
 
                 // Assert
-                service.TelemetryClient.Verify(c => c.TrackMetric(metricName,
-                    It.IsAny<double>(),
-                    It.IsAny<IDictionary<string, string>>()),
-                    Times.Once);
+                if (!isAggregatedMetric)
+                {
+                    service.TelemetryClient.Verify(c => c.TrackMetric(metricName,
+                        It.IsAny<double>(),
+                        It.IsAny<IDictionary<string, string>>()),
+                        Times.Once);
+                }
+                else
+                {
+                    service.TelemetryClient.Verify(c => c.TrackAggregatedMetric(metricName,
+                        It.IsAny<double>(),
+                        It.IsAny<string>(), It.IsAny<string>()),
+                        Times.Once);
+                }
             }
 
             [Fact]
@@ -764,7 +818,7 @@ namespace NuGetGallery
                     },
                     new object[]
                     {
-                        new Package[0]
+                        Array.Empty<Package>()
                     },
                     new object[]
                     {
@@ -781,7 +835,7 @@ namespace NuGetGallery
             public void TrackPackageDeprecateThrowsIfPackageListInvalid(IReadOnlyList<Package> packages)
             {
                 var service = CreateService();
-                Assert.Throws<ArgumentException>(() => service.TrackPackageDeprecate(packages, PackageDeprecationStatus.CriticalBugs, null, null, false));
+                Assert.Throws<ArgumentException>(() => service.TrackPackageDeprecate(packages, PackageDeprecationStatus.CriticalBugs, null, null, false, false));
             }
 
             public static IEnumerable<object[]> TrackPackageDeprecateSucceedsWithoutAlternate_Data =>
@@ -800,7 +854,7 @@ namespace NuGetGallery
                     .Setup(x => x.TrackMetric(It.IsAny<string>(), It.IsAny<double>(), It.IsAny<IDictionary<string, string>>()))
                     .Callback<string, double, IDictionary<string, string>>((_, __, p) => allProperties.Add(p));
 
-                service.TrackPackageDeprecate(packages, status, null, null, hasCustomMessage);
+                service.TrackPackageDeprecate(packages, status, null, null, hasCustomMessage, true);
 
                 service.TelemetryClient.Verify(
                     x => x.TrackMetric("PackageDeprecate", packages.Count(), It.IsAny<IDictionary<string, string>>()),
@@ -844,7 +898,7 @@ namespace NuGetGallery
                 var alternatePackage = hasPackage ? new Package { PackageRegistration = new PackageRegistration { Id = "alt-P" }, NormalizedVersion = "4.3.2" } : null;
 
                 var status = PackageDeprecationStatus.NotDeprecated;
-                service.TrackPackageDeprecate(packages, status, alternateRegistration, alternatePackage, false);
+                service.TrackPackageDeprecate(packages, status, alternateRegistration, alternatePackage, false, true);
 
                 service.TelemetryClient.Verify(
                     x => x.TrackMetric("PackageDeprecate", packages.Count(), It.IsAny<IDictionary<string, string>>()),

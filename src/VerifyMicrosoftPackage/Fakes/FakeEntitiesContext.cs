@@ -14,7 +14,8 @@ namespace NuGet.VerifyMicrosoftPackage.Fakes
         public DbSet<Certificate> Certificates { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
         public DbSet<PackageDeprecation> Deprecations { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
         public DbSet<PackageRegistration> PackageRegistrations { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
-        public DbSet<PackageDependency> PackageDependencies  { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+        public DbSet<PackageDependency> PackageDependencies { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+        public DbSet<PackageFramework> PackageFrameworks { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
         public DbSet<Credential> Credentials { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
         public DbSet<Scope> Scopes { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
         public DbSet<User> Users { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
@@ -26,6 +27,10 @@ namespace NuGet.VerifyMicrosoftPackage.Fakes
         public DbSet<VulnerablePackageVersionRange> VulnerableRanges { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
         public DbSet<Package> Packages { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
         public DbSet<PackageRename> PackageRenames { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+        public string QueryHint => throw new NotImplementedException();
+
+        public bool HasChanges => throw new NotImplementedException();
 
         public void DeleteOnCommit<T>(T entity) where T : class
         {
@@ -53,6 +58,11 @@ namespace NuGet.VerifyMicrosoftPackage.Fakes
         }
 
         public void SetCommandTimeout(int? seconds)
+        {
+            throw new NotImplementedException();
+        }
+
+        public IDisposable WithQueryHint(string queryHint)
         {
             throw new NotImplementedException();
         }

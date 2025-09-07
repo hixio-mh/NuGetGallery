@@ -102,8 +102,7 @@ namespace NuGet.VerifyMicrosoftPackage
 
                 var commitId = _thisAssembly
                     .GetCustomAttributes<AssemblyMetadataAttribute>()
-                    .Where(x => x.Key == "CommitId")
-                    .FirstOrDefault();
+                    .FirstOrDefault(x => x.Key == "CommitId");
                 if (commitId != null)
                 {
                     _console.WriteLine($"Commit ID: {commitId.Value}");
@@ -265,6 +264,8 @@ namespace NuGet.VerifyMicrosoftPackage
             var telemetryService = new FakeTelemetryService();
             var securityPolicyService = new FakeSecurityPolicyService();
             var contextFake = new FakeEntitiesContext();
+            var contentObjectService = new FakeContentObjectService();
+            var featureFlagService = new FakeFeatureFlagService();
 
             var packageService = new PackageService(
                 packageRegistrationRepository,
@@ -273,7 +274,10 @@ namespace NuGet.VerifyMicrosoftPackage
                 auditingService,
                 telemetryService,
                 securityPolicyService,
-                contextFake);
+                contextFake,
+                contentObjectService,
+                featureFlagService);
+
             return packageService;
         }
 

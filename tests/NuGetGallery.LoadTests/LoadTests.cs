@@ -87,8 +87,8 @@ namespace NuGetGallery.LoadTests
         [TestCategory("P0Tests")]
         public async Task PackagesApiTest()
         {
-            string packageId = "newtonsoft.json";
-            string url = UrlHelper.V2FeedRootUrl + @"Packages()?$filter=tolower(Id) eq '" + packageId + "'&$orderby=Id";
+            string packageId = "Newtonsoft.Json";
+            string url = UrlHelper.V2FeedRootUrl + $"Packages()?$filter=Id eq '{packageId}'";
             string expectedText = @"<id>" + UrlHelper.V2FeedRootUrl + "Packages(Id='" + packageId;
             var odataHelper = new ODataHelper();
             var containsResponseText = await odataHelper.ContainsResponseTextIgnoreCase(url, expectedText);
@@ -128,13 +128,13 @@ namespace NuGetGallery.LoadTests
         }
 
         [TestMethod]
-        [Description("Verify the webresponse from top30 packages feed contains jQuery")]
+        [Description("Verify the webresponse from top30 packages feed contains Newtonsoft.Json")]
         [TestCategory("P0Tests")]
         public async Task Top30PackagesFeedTest()
         {
             string url = UrlHelper.V2FeedRootUrl + @"/Search()?$filter=IsAbsoluteLatestVersion&$orderby=DownloadCount%20desc,Id&$skip=0&$top=30&searchTerm=''&targetFramework='net45'&includePrerelease=true";
             var odataHelper = new ODataHelper();
-            bool containsResponseText = await odataHelper.ContainsResponseText(url, "jQuery");
+            bool containsResponseText = await odataHelper.ContainsResponseText(url, "Newtonsoft.Json");
             Assert.IsTrue(containsResponseText);
         }
 
@@ -168,7 +168,7 @@ namespace NuGetGallery.LoadTests
         public async Task SearchMicrosoftDotNetCuratedFeed()
         {
             var packageId = "microsoft.aspnet.webpages";
-            var requestUrl = UrlHelper.DotnetCuratedFeedUrl + @"Packages()?$filter=tolower(Id)%20eq%20'" + packageId + "'&$orderby=Id&$skip=0&$top=30";
+            var requestUrl = UrlHelper.DotnetCuratedFeedUrl + @"Search()?searchTerm='packageid%3A" + packageId + "'";
 
             string responseText;
             using (var httpClient = new HttpClient())

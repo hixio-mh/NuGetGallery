@@ -11,7 +11,6 @@ using System.Text.RegularExpressions;
 using System.Web;
 using System.Web.Mvc;
 using System.Web.Mvc.Html;
-using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
 using NuGetGallery.Configuration;
 
@@ -69,7 +68,7 @@ namespace NuGetGallery.Helpers
                 encodedText = encodedText.Replace("\n", "<br />");
 
                 // Replace more than one space in a row with a space then &nbsp;.
-                encodedText = RegexEx.TryReplaceWithTimeout(
+                encodedText = RegexEx.ReplaceWithTimeoutOrOriginal(
                     encodedText,
                     "  +",
                     match => " " + string.Join(string.Empty, Enumerable.Repeat("&nbsp;", match.Value.Length - 1)),
@@ -101,9 +100,9 @@ namespace NuGetGallery.Helpers
                     string siteRoot = configurationService.GetSiteRoot(useHttps: true);
 
                     // Format links to NuGet packages
-                    Match packageMatch = RegexEx.MatchWithTimeout(
+                    Match packageMatch = RegexEx.MatchWithTimeoutOrNull(
                         formattedUri,
-                        $@"({Regex.Escape(siteRoot)}\/packages\/(?<name>\w+([_.-]\w+)*(\/[0-9a-zA-Z-.]+)?)\/?$)",
+                        $@"(^{Regex.Escape(siteRoot)}\/packages\/(?<name>\w+([_.-]\w+)*(\/[0-9a-zA-Z-.]+)?)\/?$)",
                         RegexOptions.IgnoreCase);
                     if (packageMatch != null && packageMatch.Groups["name"].Success)
                     {
@@ -124,7 +123,7 @@ namespace NuGetGallery.Helpers
 
             // Turn HTTP and HTTPS URLs into links.
             // Source: https://stackoverflow.com/a/4750468
-            var matches = RegexEx.MatchesWithTimeout(
+            var matches = RegexEx.MatchesWithTimeoutOrNull(
                 text,
                 @"((http|https):\/\/[\w\-_]+(\.[\w\-_]+)+([\w\-\.,@?^=%&amp;:/~\+#]*[\w\-\@?^=%&amp;/~\+#])?)",
                 RegexOptions.IgnoreCase);

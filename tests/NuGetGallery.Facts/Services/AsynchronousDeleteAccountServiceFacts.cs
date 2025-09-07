@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -44,7 +45,10 @@ namespace NuGetGallery.Services
 
                 var message = testService.TopicClient.LastSentMessage;
                 Assert.NotNull(message);
-                var messageData = messageSerializer.Deserialize(message);
+                var receivedMessage = new Mock<IReceivedBrokeredMessage>();
+                receivedMessage.Setup(x => x.Properties).Returns(message.Properties.ToDictionary(x => x.Key, x => x.Value));
+                receivedMessage.Setup(x => x.GetBody()).Returns(() => message.GetBody());
+                var messageData = messageSerializer.Deserialize(receivedMessage.Object);
                 Assert.Equal(username, messageData.Username);
                 Assert.Equal("GalleryUser", messageData.Source);
             }
@@ -79,7 +83,10 @@ namespace NuGetGallery.Services
 
                 var message = testService.TopicClient.LastSentMessage;
                 Assert.NotNull(message);
-                var messageData = messageSerializer.Deserialize(message);
+                var receivedMessage = new Mock<IReceivedBrokeredMessage>();
+                receivedMessage.Setup(x => x.Properties).Returns(message.Properties.ToDictionary(x => x.Key, x => x.Value));
+                receivedMessage.Setup(x => x.GetBody()).Returns(() => message.GetBody());
+                var messageData = messageSerializer.Deserialize(receivedMessage.Object);
                 Assert.Equal(username, messageData.Username);
                 Assert.Equal("GalleryAdmin", messageData.Source);
             }
@@ -185,6 +192,12 @@ namespace NuGetGallery.Services
 
             public Task SendAsync(IBrokeredMessage message)
             {
+                Send(message);
+                return Task.CompletedTask;
+            }
+
+            public void Send(IBrokeredMessage message)
+            {
                 ++SendAsyncCallCount;
                 if (ShouldFail)
                 {
@@ -192,8 +205,10 @@ namespace NuGetGallery.Services
                 }
 
                 LastSentMessage = message;
-                return Task.FromResult(0);
             }
+
+            public void Close() => throw new NotImplementedException();
+            public Task CloseAsync() => throw new NotImplementedException();
         }
 
         [Schema(Name = AccountDeleteMessageSchemaName, Version = 1)]

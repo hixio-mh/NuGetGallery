@@ -6,13 +6,11 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using System.Web;
 using System.Web.Mvc;
 using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
 using NuGetGallery.Configuration;
 using NuGetGallery.Filters;
-using NuGetGallery.Infrastructure.Mail.Messages;
 
 namespace NuGetGallery
 {
@@ -125,7 +123,7 @@ namespace NuGetGallery
             string username = addOwnerData.Username;
             string message = addOwnerData.Message;
 
-            if (Regex.IsMatch(username, GalleryConstants.EmailValidationRegex, RegexOptions.None, GalleryConstants.EmailValidationRegexTimeout))
+            if (username is not null && Regex.IsMatch(username, GalleryConstants.EmailValidationRegex, RegexOptions.None, GalleryConstants.EmailValidationRegexTimeout))
             {
                 return Json(new { success = false, message = Strings.AddOwner_NameIsEmail }, JsonRequestBehavior.AllowGet);
             }
@@ -136,62 +134,15 @@ namespace NuGetGallery
 
                 if (model.CurrentUserCanAcceptOnBehalfOfUser)
                 {
-                    await _packageOwnershipManagementService.AddPackageOwnerAsync(model.Package, model.User);
-
-                    foreach (var owner in model.Package.Owners)
-                    {
-                        var emailMessage = new PackageOwnerAddedMessage(_appConfiguration, owner, model.User, model.Package, packageUrl);
-                        await _messageService.SendMessageAsync(emailMessage);
-                    }
+                    await _packageOwnershipManagementService.AddPackageOwnerWithMessagesAsync(model.Package, model.User);
                 }
                 else
                 {
-                    var encodedMessage = HttpUtility.HtmlEncode(message);
-
-                    var ownerRequest = await _packageOwnershipManagementService.AddPackageOwnershipRequestAsync(
-                        model.Package, model.CurrentUser, model.User);
-
-                    var confirmationUrl = Url.ConfirmPendingOwnershipRequest(
-                        model.Package.Id,
-                        model.User.Username,
-                        ownerRequest.ConfirmationCode,
-                        relativeUrl: false);
-
-                    var rejectionUrl = Url.RejectPendingOwnershipRequest(
-                        model.Package.Id,
-                        model.User.Username,
-                        ownerRequest.ConfirmationCode,
-                        relativeUrl: false);
-
-                    var manageUrl = Url.ManagePackageOwnership(
-                        model.Package.Id,
-                        relativeUrl: false);
-
-                    var packageOwnershipRequestMessage = new PackageOwnershipRequestMessage(
-                        _appConfiguration,
+                    await _packageOwnershipManagementService.AddPackageOwnershipRequestWithMessagesAsync(
+                        model.Package,
                         model.CurrentUser,
                         model.User,
-                        model.Package,
-                        packageUrl,
-                        confirmationUrl,
-                        rejectionUrl,
-                        encodedMessage,
-                        string.Empty);
-
-                    await _messageService.SendMessageAsync(packageOwnershipRequestMessage);
-
-                    foreach (var owner in model.Package.Owners)
-                    {
-                        var emailMessage = new PackageOwnershipRequestInitiatedMessage(
-                            _appConfiguration,
-                            model.CurrentUser,
-                            owner,
-                            model.User,
-                            model.Package,
-                            manageUrl);
-
-                        await _messageService.SendMessageAsync(emailMessage);
-                    }
+                        message);
                 }
 
                 return Json(new
@@ -232,17 +183,11 @@ namespace NuGetGallery
                         return Json(new { success = false, message = "You can't remove the only owner from a package." }, JsonRequestBehavior.AllowGet);
                     }
 
-                    await _packageOwnershipManagementService.RemovePackageOwnerAsync(model.Package, model.CurrentUser, model.User, commitChanges: true);
-
-                    var emailMessage = new PackageOwnerRemovedMessage(_appConfiguration, model.CurrentUser, model.User, model.Package);
-                    await _messageService.SendMessageAsync(emailMessage);
+                    await _packageOwnershipManagementService.RemovePackageOwnerWithMessagesAsync(model.Package, model.CurrentUser, model.User, requireNamespaceOwnership: true);
                 }
                 else
                 {
-                    await _packageOwnershipManagementService.DeletePackageOwnershipRequestAsync(model.Package, model.User);
-
-                    var emailMessage = new PackageOwnershipRequestCanceledMessage(_appConfiguration, model.CurrentUser, model.User, model.Package);
-                    await _messageService.SendMessageAsync(emailMessage);
+                    await _packageOwnershipManagementService.CancelPackageOwnershipRequestWithMessagesAsync(model.Package, model.CurrentUser, model.User);
                 }
 
                 return Json(new { success = true });
@@ -278,6 +223,12 @@ namespace NuGetGallery
                 return false;
             }
 
+            if (currentUser.IsLocked)
+            {
+                model = new ManagePackageOwnerModel(ServicesStrings.UserAccountIsLocked);
+                return false;
+            }
+
             if (ActionsRequiringPermissions.ManagePackageOwnership.CheckPermissionsOnBehalfOfAnyAccount(currentUser, package) != PermissionsCheckResult.Allowed)
             {
                 model = new ManagePackageOwnerModel(Strings.AddOwner_NotPackageOwner);
@@ -294,6 +245,13 @@ namespace NuGetGallery
             {
                 model = new ManagePackageOwnerModel(
                     string.Format(CultureInfo.CurrentCulture, Strings.AddOwner_OwnerNotConfirmed, username));
+                return false;
+            }
+
+            if (user.IsLocked)
+            {
+                model = new ManagePackageOwnerModel(
+                    string.Format(CultureInfo.CurrentCulture, ServicesStrings.SpecificAccountIsLocked, username));
                 return false;
             }
 

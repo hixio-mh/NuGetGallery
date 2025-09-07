@@ -26,7 +26,7 @@ namespace GitHubVulnerabilities2Db.Gallery
             throw new NotImplementedException();
         }
 
-        public void TrackABTestEnrollmentUpgraded(int schemaVersion, int previewSearchBucket, int packageDepentsBucket)
+        public void TrackABTestEnrollmentUpgraded(int oldSchemaVersion, int newSchemaVersion, int previewSearchBucket, int packageDepentsBucket)
         {
             throw new NotImplementedException();
         }
@@ -66,7 +66,7 @@ namespace GitHubVulnerabilities2Db.Gallery
             throw new NotImplementedException();
         }
 
-        public void TrackDownloadJsonRefreshDuration(long milliseconds)
+        public void TrackDownloadJsonRefreshDuration(TimeSpan duration)
         {
             throw new NotImplementedException();
         }
@@ -82,6 +82,11 @@ namespace GitHubVulnerabilities2Db.Gallery
         }
 
         public void TrackGetPackageRegistrationDownloadCountFailed(string packageId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void TrackInstanceUptime(TimeSpan uptime)
         {
             throw new NotImplementedException();
         }
@@ -201,7 +206,7 @@ namespace GitHubVulnerabilities2Db.Gallery
             throw new NotImplementedException();
         }
 
-        public void TrackPackageDeprecate(IReadOnlyList<Package> packages, PackageDeprecationStatus status, PackageRegistration alternateRegistration, Package alternatePackage, bool hasCustomMessage)
+        public void TrackPackageDeprecate(IReadOnlyList<Package> packages, PackageDeprecationStatus status, PackageRegistration alternateRegistration, Package alternatePackage, bool hasCustomMessage, bool hasChanges)
         {
             throw new NotImplementedException();
         }
@@ -236,6 +241,11 @@ namespace GitHubVulnerabilities2Db.Gallery
             throw new NotImplementedException();
         }
 
+        public void TrackPackagePushDisconnectEvent()
+        {
+            throw new NotImplementedException();
+        }
+
         public void TrackPackagePushEvent(Package package, User user, IIdentity identity)
         {
             throw new NotImplementedException();
@@ -247,6 +257,11 @@ namespace GitHubVulnerabilities2Db.Gallery
         }
 
         public void TrackPackagePushNamespaceConflictEvent(string packageId, string packageVersion, User user, IIdentity identity)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void TrackPackagePushOwnerlessNamespaceConflictEvent(string packageId, string packageVersion, User user, IIdentity identity)
         {
             throw new NotImplementedException();
         }
@@ -272,6 +287,11 @@ namespace GitHubVulnerabilities2Db.Gallery
         }
 
         public void TrackPackageRevalidate(Package package)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void TrackPackagesUpdateListed(IReadOnlyList<Package> packages, bool listed)
         {
             throw new NotImplementedException();
         }
@@ -316,6 +336,11 @@ namespace GitHubVulnerabilities2Db.Gallery
             throw new NotImplementedException();
         }
 
+        public void TrackSymbolPackagePushDisconnectEvent()
+        {
+            throw new NotImplementedException();
+        }
+
         public void TrackSymbolPackagePushEvent(string packageId, string packageVersion)
         {
             throw new NotImplementedException();
@@ -351,8 +376,36 @@ namespace GitHubVulnerabilities2Db.Gallery
             throw new NotImplementedException();
         }
 
+        public void TrackApiRequest(string endpoint)
+        {
+            throw new NotImplementedException();
+        }
+
         public void TrackVerifyPackageKeyEvent(string packageId, string packageVersion, User user, IIdentity identity, int statusCode)
         {
+            throw new NotImplementedException();
+        }
+
+        public void TrackVulnerabilitiesCacheRefreshDuration(TimeSpan duration)
+        {
+            throw new NotImplementedException();
+        }
+
+        public IDisposable TrackSyncSqlConnectionCreationDuration()
+        {
+            throw new NotImplementedException();
+        }
+
+        public IDisposable TrackAsyncSqlConnectionCreationDuration()
+        {
+            throw new NotImplementedException();
+        }
+
+        public void TrackDownloadJsonTotalPackageIds(int totalPackageIds) {
+            throw new NotImplementedException();
+        }
+
+        public void TrackDownloadJsonTotalPackageVersions(int totalPackageVersions) {
             throw new NotImplementedException();
         }
     }

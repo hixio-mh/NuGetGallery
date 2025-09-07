@@ -1,22 +1,12 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-using System;
+using NuGet.Services.GitHub.Configuration;
 
 namespace GitHubVulnerabilities2Db.Configuration
 {
-    public class GitHubVulnerabilities2DbConfiguration
+    public class GitHubVulnerabilities2DbConfiguration : GraphQLQueryConfiguration
     {
-        /// <summary>
-        /// GitHub's v4 GraphQL API endpoint.
-        /// </summary>
-        public Uri GitHubGraphQLQueryEndpoint { get; set; } = new Uri("https://api.github.com/graphql");
-
-        /// <summary>
-        /// The personal access token to use to authenticate with GitHub.
-        /// </summary>
-        public string GitHubPersonalAccessToken { get; set; }
-
         /// <summary>
         /// The storage connection to use to save the job's cursor.
         /// </summary>
@@ -31,5 +21,10 @@ namespace GitHubVulnerabilities2Db.Configuration
         /// The name of the blob to save the job's advisories cursor in.
         /// </summary>
         public string AdvisoryCursorBlobName { get; set; } = "cursor.json";
+
+        /// <summary>
+        /// The User-Agent header to send with each request to GitHub.
+        /// </summary>
+        public override string UserAgent { get; set; } = "NuGet.GitHubVulnerabilities2Db";
     }
 }

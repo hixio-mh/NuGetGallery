@@ -1,9 +1,8 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Web;
 using System.Web.Mvc;
 using System.Web.Routing;
@@ -19,7 +18,16 @@ namespace NuGetGallery
     {
         private const string Area = "area";
         private static IGalleryConfigurationService _configuration;
-        private const string PackageExplorerDeepLink = @"https://npe.codeplex.com/releases/clickonce/NuGetPackageExplorer.application?url={0}&id={1}&version={2}";
+
+        /// <summary>
+        /// MUST MATCH common.js. Used to add localy stored search params to a element.
+        /// </summary>
+        public const string PackagesLinkClass = "link-to-add-local-search-filters";
+
+        /// <summary>
+        /// MUST MATCH common.js. Used to add localy stored search params to form element.
+        /// </summary>
+        public const string SimpleSearchFormId = "form-to-add-local-search-filters";
 
         public static class Fragments
         {
@@ -69,12 +77,35 @@ namespace NuGetGallery
             return _configuration.GetSiteRoot(useHttps);
         }
 
+        internal static string GetSupportEmailSiteRoot(bool useHttps)
+        {
+            return _configuration.GetSupportEmailSiteRoot();
+        }
+
+        public static string GetCanonicalLinkUrl(this UrlHelper url)
+        {
+            var current = url.RequestContext.HttpContext.Request.Url;
+            var siteRoot = new Uri(_configuration.Current.SiteRoot);
+
+            var builder = new UriBuilder(current);
+            builder.Scheme = siteRoot.Scheme;
+            builder.Host = siteRoot.Host;
+            builder.Port = siteRoot.Port;
+            return builder.Uri.AbsoluteUri;
+        }
+
         private static string GetConfiguredSiteHostName()
         {
             // It doesn't matter which value we pass on here for the useHttps parameter.
             // We're just interested in the host, which is the same for both, 
             // as it all results from the same 'NuGetGallery.SiteRoot' URL value.
             var siteRoot = GetSiteRoot(useHttps: true);
+            return new Uri(siteRoot).Host;
+        }
+
+        private static string GetConfiguredSupportEmailSiteHostName()
+        {
+            var siteRoot = GetSupportEmailSiteRoot(useHttps: true);
             return new Uri(siteRoot).Host;
         }
 
@@ -148,6 +179,12 @@ namespace NuGetGallery
             int page,
             string q,
             bool includePrerelease,
+            string frameworks,
+            string tfms,
+            bool includeComputedFrameworks,
+            string frameworkFilterMode,
+            string packageType,
+            string sortBy,
             bool relativeUrl = true)
         {
             var routeValues = new RouteValueDictionary();
@@ -165,6 +202,36 @@ namespace NuGetGallery
             if (!includePrerelease)
             {
                 routeValues["prerel"] = "false";
+            }
+
+            if (!string.IsNullOrWhiteSpace(frameworks))
+            {
+                routeValues["frameworks"] = frameworks;
+            }
+
+            if (!string.IsNullOrWhiteSpace(tfms))
+            {
+                routeValues["tfms"] = tfms;
+            }
+
+            if (!includeComputedFrameworks)
+            {
+                routeValues["includeComputedFrameworks"] = "false";
+            }
+
+            if (!string.IsNullOrWhiteSpace(frameworkFilterMode))
+            {
+                routeValues["frameworkFilterMode"] = frameworkFilterMode;
+            }
+
+            if (!string.IsNullOrWhiteSpace(packageType))
+            {
+                routeValues["packageType"] = packageType;
+            }
+
+            if (!string.IsNullOrWhiteSpace(sortBy))
+            {
+                routeValues["sortBy"] = sortBy;
             }
 
             return GetActionLink(
@@ -205,34 +272,44 @@ namespace NuGetGallery
             return new RouteUrlTemplate<IPackageVersionModel>(linkGenerator, routesGenerator);
         }
 
-        public static string Package(this UrlHelper url, string id, bool relativeUrl = true)
+        public static string Package(this UrlHelper url, string id, bool relativeUrl = true, bool supportEmail = false)
         {
-            return url.Package(id, version: null, relativeUrl: relativeUrl);
+            return url.Package(id, version: null, relativeUrl: relativeUrl, supportEmail: supportEmail);
         }
 
         public static string Package(
             this UrlHelper url,
             string id,
             string version,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool preview = false,
+            bool supportEmail = false)
         {
-            string result = GetRouteLink(
+            var normalized = (version != null) ? NuGetVersionFormatter.Normalize(version) : version;
+
+            var result = GetRouteLink(
                 url,
                 RouteName.DisplayPackage,
                 relativeUrl,
                 routeValues: new RouteValueDictionary
                 {
                     { "id", id },
-                    { "version", version }
-                });
+                    { "version", normalized },
+                    { "preview", preview ? "1" : null }
+                },
+                supportEmail: supportEmail);
 
             // Ensure trailing slashes for versionless package URLs, as a fix for package filenames that look like known file extensions
             return version == null ? EnsureTrailingSlash(result) : result;
         }
 
-        public static string Package(this UrlHelper url, Package package, bool relativeUrl = true)
+        public static string Package(
+            this UrlHelper url,
+            Package package,
+            bool relativeUrl = true,
+            bool preview = false)
         {
-            return url.Package(package.PackageRegistration.Id, package.NormalizedVersion, relativeUrl);
+            return url.Package(package.PackageRegistration.Id, package.NormalizedVersion, relativeUrl, preview);
         }
 
         public static string Package(this UrlHelper url, IPackageVersionModel package, bool relativeUrl = true)
@@ -308,25 +385,6 @@ namespace NuGetGallery
 
             // Ensure trailing slashes for versionless package URLs, as a fix for package filenames that look like known file extensions
             return version == null ? EnsureTrailingSlash(result) : result;
-        }
-        public static string ExplorerDeepLink(
-            this UrlHelper url,
-            int feedVersion,
-            string id,
-            string version)
-        {
-            var urlResult = GetRouteLink(
-                url,
-                routeName: $"v{feedVersion}{RouteName.DownloadPackage}",
-                relativeUrl: false,
-                routeValues: new RouteValueDictionary
-                {
-                    { "Id", id }
-                });
-
-            urlResult = EnsureTrailingSlash(urlResult);
-
-            return string.Format(CultureInfo.InvariantCulture, PackageExplorerDeepLink, urlResult, id, version);
         }
 
         public static string LogOn(this UrlHelper url, bool relativeUrl = true)
@@ -580,7 +638,8 @@ namespace NuGetGallery
             this UrlHelper url,
             User user,
             int page = 1,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool supportEmail = false)
         {
             var routeValues = new RouteValueDictionary
             {
@@ -592,7 +651,7 @@ namespace NuGetGallery
                 routeValues.Add("page", page);
             }
 
-            return GetActionLink(url, "Profiles", "Users", relativeUrl, routeValues);
+            return GetActionLink(url, "Profiles", "Users", relativeUrl, routeValues, supportEmail: supportEmail);
         }
 
         public static string Avatar(
@@ -953,11 +1012,21 @@ namespace NuGetGallery
                 interceptReturnUrl: false);
         }
 
-        public static string ManageMyApiKeys(this UrlHelper url, bool relativeUrl = true)
+        public static string ManageMyApiKeys(this UrlHelper url, bool relativeUrl = true, bool supportEmail = false)
         {
             return GetActionLink(
                 url,
                 nameof(UsersController.ApiKeys),
+                "Users",
+                relativeUrl,
+                supportEmail: supportEmail);
+        }
+
+        public static string ManageMyTrustedPublishing(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetActionLink(
+                url,
+                nameof(UsersController.TrustedPublishing),
                 "Users",
                 relativeUrl);
         }
@@ -1004,35 +1073,37 @@ namespace NuGetGallery
                 });
         }
 
-        public static string AcceptOrganizationMembershipRequest(this UrlHelper url, MembershipRequest request, bool relativeUrl = true)
+        public static string AcceptOrganizationMembershipRequest(this UrlHelper url, MembershipRequest request, bool relativeUrl = true, bool supportEmail = false)
         {
-            return url.AcceptOrganizationMembershipRequest(request.Organization.Username, request.ConfirmationToken, relativeUrl);
+            return url.AcceptOrganizationMembershipRequest(request.Organization.Username, request.ConfirmationToken, relativeUrl, supportEmail);
         }
 
-        public static string RejectOrganizationMembershipRequest(this UrlHelper url, MembershipRequest request, bool relativeUrl = true)
+        public static string RejectOrganizationMembershipRequest(this UrlHelper url, MembershipRequest request, bool relativeUrl = true, bool supportEmail = false)
         {
-            return url.RejectOrganizationMembershipRequest(request.Organization.Username, request.ConfirmationToken, relativeUrl);
+            return url.RejectOrganizationMembershipRequest(request.Organization.Username, request.ConfirmationToken, relativeUrl, supportEmail);
         }
 
-        public static string AcceptOrganizationMembershipRequest(this UrlHelper url, string organizationUsername, string confirmationToken, bool relativeUrl = true)
+        public static string AcceptOrganizationMembershipRequest(this UrlHelper url, string organizationUsername, string confirmationToken, bool relativeUrl = true, bool supportEmail = false)
         {
             return url.HandleOrganizationMembershipRequest(
                 nameof(OrganizationsController.ConfirmMemberRequest),
                 organizationUsername,
                 confirmationToken,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
-        public static string RejectOrganizationMembershipRequest(this UrlHelper url, string organizationUsername, string confirmationToken, bool relativeUrl = true)
+        public static string RejectOrganizationMembershipRequest(this UrlHelper url, string organizationUsername, string confirmationToken, bool relativeUrl = true, bool supportEmail = false)
         {
             return url.HandleOrganizationMembershipRequest(
                 nameof(OrganizationsController.RejectMemberRequest),
                 organizationUsername,
                 confirmationToken,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
-        private static string HandleOrganizationMembershipRequest(this UrlHelper url, string actionName, string organizationUsername, string confirmationToken, bool relativeUrl = true)
+        private static string HandleOrganizationMembershipRequest(this UrlHelper url, string actionName, string organizationUsername, string confirmationToken, bool relativeUrl = true, bool supportEmail = false)
         {
             return GetActionLink(url,
                 actionName,
@@ -1042,7 +1113,8 @@ namespace NuGetGallery
                 {
                     { "accountName", organizationUsername },
                     { "confirmationToken", confirmationToken }
-                });
+                },
+                supportEmail: supportEmail);
         }
 
         public static string CancelOrganizationMembershipRequest(this UrlHelper url, string accountName, bool relativeUrl = true)
@@ -1187,7 +1259,8 @@ namespace NuGetGallery
             string packageId,
             string username,
             string confirmationCode,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool supportEmail = false)
         {
             return HandlePendingOwnershipRequest(
                 url,
@@ -1195,7 +1268,8 @@ namespace NuGetGallery
                 packageId,
                 username,
                 confirmationCode,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
         public static RouteUrlTemplate<OwnerRequestsListItemViewModel> RejectPendingOwnershipRequestTemplate(
@@ -1213,7 +1287,8 @@ namespace NuGetGallery
             string packageId,
             string username,
             string confirmationCode,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool supportEmail = false)
         {
             return HandlePendingOwnershipRequest(
                 url,
@@ -1221,7 +1296,8 @@ namespace NuGetGallery
                 packageId,
                 username,
                 confirmationCode,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
         private static RouteUrlTemplate<OwnerRequestsListItemViewModel> HandlePendingOwnershipRequestTemplate(
@@ -1252,7 +1328,8 @@ namespace NuGetGallery
             string packageId,
             string username,
             string confirmationCode,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool supportEmail = false)
         {
             var routeValues = new RouteValueDictionary
             {
@@ -1261,14 +1338,15 @@ namespace NuGetGallery
                 ["token"] = confirmationCode
             };
 
-            return GetActionLink(url, actionName, "Packages", relativeUrl, routeValues);
+            return GetActionLink(url, actionName, "Packages", relativeUrl, routeValues, supportEmail: supportEmail);
         }
 
         public static string ConfirmEmail(
             this UrlHelper url,
             string username,
             string token,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool supportEmail = false)
         {
             var routeValues = new RouteValueDictionary
             {
@@ -1276,14 +1354,15 @@ namespace NuGetGallery
                 ["token"] = token
             };
 
-            return GetActionLink(url, "Confirm", "Users", relativeUrl, routeValues);
+            return GetActionLink(url, "Confirm", "Users", relativeUrl, routeValues, supportEmail: supportEmail);
         }
 
         public static string ConfirmOrganizationEmail(
             this UrlHelper url,
             string username,
             string token,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool supportEmail = false)
         {
             var routeValues = new RouteValueDictionary
             {
@@ -1291,7 +1370,7 @@ namespace NuGetGallery
                 ["token"] = token
             };
 
-            return GetActionLink(url, "Confirm", "Organizations", relativeUrl, routeValues);
+            return GetActionLink(url, "Confirm", "Organizations", relativeUrl, routeValues, supportEmail: supportEmail);
         }
 
         public static string ResetEmailOrPassword(
@@ -1299,7 +1378,8 @@ namespace NuGetGallery
             string username,
             string token,
             bool forgotPassword,
-            bool relativeUrl = true)
+            bool relativeUrl = true,
+            bool supportEmail = false)
         {
             var routeValues = new RouteValueDictionary
             {
@@ -1308,7 +1388,7 @@ namespace NuGetGallery
                 ["forgot"] = forgotPassword
             };
 
-            return GetActionLink(url, "ResetPassword", "Users", relativeUrl, routeValues);
+            return GetActionLink(url, "ResetPassword", "Users", relativeUrl, routeValues, supportEmail: supportEmail);
         }
 
         public static string VerifyPackage(this UrlHelper url, bool relativeUrl = true)
@@ -1326,9 +1406,9 @@ namespace NuGetGallery
             return GetRouteLink(url, RouteName.Downloads, relativeUrl);
         }
 
-        public static string Contact(this UrlHelper url, bool relativeUrl = true)
+        public static string Contact(this UrlHelper url, bool relativeUrl = true, bool supportEmail = false)
         {
-            return GetActionLink(url, "Contact", "Pages", relativeUrl);
+            return GetActionLink(url, "Contact", "Pages", relativeUrl, supportEmail: supportEmail);
         }
 
         public static string ContactOwners(this UrlHelper url, IPackageVersionModel package, bool relativeUrl = true)
@@ -1339,6 +1419,11 @@ namespace NuGetGallery
         public static string License(this UrlHelper url, IPackageVersionModel package, bool relativeUrl = true)
         {
             return url.PackageVersionAction(nameof(PackagesController.License), package, relativeUrl);
+        }
+
+        public static string FrameworksTab(this UrlHelper url, string id, string version, bool relativeUrl = true)
+        {
+            return url.Package(id, version, relativeUrl).TrimEnd('/') + "#supportedframeworks-body-tab";
         }
 
         public static string Terms(this UrlHelper url, bool relativeUrl = true)
@@ -1361,6 +1446,11 @@ namespace NuGetGallery
             return GetActionLink(url, "Privacy", "Pages", relativeUrl);
         }
 
+        public static string ExternalPrivacyUrl(this UrlHelper url)
+        {
+            return _configuration.Current.ExternalPrivacyPolicyUrl;
+        }
+
         public static string About(this UrlHelper url, bool relativeUrl = true)
         {
             if (!String.IsNullOrEmpty(_configuration.Current.ExternalAboutUrl))
@@ -1373,6 +1463,11 @@ namespace NuGetGallery
 
         public static string Admin(this UrlHelper url, bool relativeUrl = true)
         {
+            if (!AdminHelper.IsAdminPanelEnabled)
+            {
+                throw new InvalidOperationException("Admin panel is disabled, can't produce a link to it");
+            }
+
             return GetActionLink(
                 url,
                 "Index",
@@ -1401,6 +1496,11 @@ namespace NuGetGallery
             return GetActionLink(url, "RemoveCredential", "Users", relativeUrl);
         }
 
+        public static string RevokeApiKeyCredential(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetActionLink(url, "RevokeApiKeyCredential", "Users", relativeUrl);
+        }
+
         public static string RegenerateCredential(this UrlHelper url, bool relativeUrl = true)
         {
             return GetActionLink(url, "RegenerateCredential", "Users", relativeUrl);
@@ -1416,6 +1516,26 @@ namespace NuGetGallery
             return GetActionLink(url, "GenerateApiKey", "Users", relativeUrl);
         }
 
+        public static string GenerateTrustedPublisherPolicy(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetActionLink(url, "GenerateTrustedPublisherPolicy", "Users", relativeUrl);
+        }
+
+        public static string EditTrustedPublisherPolicy(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetActionLink(url, "EditTrustedPublisherPolicy", "Users", relativeUrl);
+        }
+
+        public static string EnableTrustedPublisherPolicy(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetActionLink(url, "EnableTrustedPublisherPolicy", "Users", relativeUrl);
+        }
+
+        public static string RemoveTrustedPublisherPolicy(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetActionLink(url, "RemoveTrustedPublisherPolicy", "Users", relativeUrl);
+        }
+
         public static string TransformAccount(this UrlHelper url, bool relativeUrl = true)
         {
             return GetActionLink(
@@ -1425,50 +1545,55 @@ namespace NuGetGallery
                 relativeUrl);
         }
 
-        public static string ConfirmTransformAccount(this UrlHelper url, User accountToTransform, bool relativeUrl = true)
+        public static string ConfirmTransformAccount(this UrlHelper url, User accountToTransform, bool relativeUrl = true, bool supportEmail = false)
         {
             return url.HandleTransformAccount(
                 nameof(UsersController.ConfirmTransformToOrganization),
                 accountToTransform,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
-        public static string RejectTransformAccount(this UrlHelper url, User accountToTransform, bool relativeUrl = true)
+        public static string RejectTransformAccount(this UrlHelper url, User accountToTransform, bool relativeUrl = true, bool supportEmail = false)
         {
             return url.HandleTransformAccount(
                 nameof(UsersController.RejectTransformToOrganization),
                 accountToTransform,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
-        private static string HandleTransformAccount(this UrlHelper url, string action, User accountToTransform, bool relativeUrl = true)
+        private static string HandleTransformAccount(this UrlHelper url, string action, User accountToTransform, bool relativeUrl = true, bool supportEmail = false)
         {
             return url.HandleTransformAccount(
                 action,
                 accountToTransform.Username,
                 accountToTransform.OrganizationMigrationRequest.ConfirmationToken,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
-        public static string ConfirmTransformAccount(this UrlHelper url, string accountToTransformUsername, string confirmationToken, bool relativeUrl = true)
+        public static string ConfirmTransformAccount(this UrlHelper url, string accountToTransformUsername, string confirmationToken, bool relativeUrl = true, bool supportEmail = false)
         {
             return url.HandleTransformAccount(
                 nameof(UsersController.ConfirmTransformToOrganization),
                 accountToTransformUsername,
                 confirmationToken,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
-        public static string RejectTransformAccount(this UrlHelper url, string accountToTransformUsername, string confirmationToken, bool relativeUrl = true)
+        public static string RejectTransformAccount(this UrlHelper url, string accountToTransformUsername, string confirmationToken, bool relativeUrl = true, bool supportEmail = false)
         {
             return url.HandleTransformAccount(
                 nameof(UsersController.RejectTransformToOrganization),
                 accountToTransformUsername,
                 confirmationToken,
-                relativeUrl);
+                relativeUrl,
+                supportEmail);
         }
 
-        private static string HandleTransformAccount(this UrlHelper url, string action, string accountToTransformUsername, string confirmationToken, bool relativeUrl = true)
+        private static string HandleTransformAccount(this UrlHelper url, string action, string accountToTransformUsername, string confirmationToken, bool relativeUrl = true, bool supportEmail = false)
         {
             return GetActionLink(
                 url,
@@ -1479,7 +1604,8 @@ namespace NuGetGallery
                 {
                     { "accountNameToTransform", accountToTransformUsername },
                     { "token", confirmationToken }
-                });
+                },
+                supportEmail: supportEmail);
         }
 
         public static string CancelTransformAccount(this UrlHelper url, User accountToTransform, bool relativeUrl = true)
@@ -1532,11 +1658,12 @@ namespace NuGetGallery
             bool relativeUrl,
             RouteValueDictionary routeValues = null,
             bool interceptReturnUrl = true,
-            string area = "" // Default to no area. Admin links should specify the "Admin" area explicitly.
+            string area = "", // Default to no area. Admin links should specify the "Admin" area explicitly.
+            bool supportEmail = false
             )
         {
             var protocol = GetProtocol(url);
-            var hostName = GetConfiguredSiteHostName();
+            var hostName = supportEmail ? GetConfiguredSupportEmailSiteHostName(): GetConfiguredSiteHostName();
 
             routeValues = routeValues ?? new RouteValueDictionary();
             if (!routeValues.ContainsKey(Area))
@@ -1583,10 +1710,12 @@ namespace NuGetGallery
             UrlHelper url,
             string routeName,
             bool relativeUrl,
-            RouteValueDictionary routeValues = null)
+            RouteValueDictionary routeValues = null,
+            bool supportEmail = false)
         {
             var protocol = GetProtocol(url);
-            var hostName = GetConfiguredSiteHostName();
+             
+            var hostName = supportEmail ? GetConfiguredSupportEmailSiteHostName() : GetConfiguredSiteHostName();
 
             var routeLink = url.RouteUrl(routeName, routeValues, protocol, hostName);
 

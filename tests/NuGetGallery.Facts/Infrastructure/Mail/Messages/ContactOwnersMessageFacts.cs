@@ -1,10 +1,9 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
 using System.Net.Mail;
-using Moq;
 using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
 using Xunit;
@@ -19,12 +18,12 @@ namespace NuGetGallery.Infrastructure.Mail.Messages
             {
                 get
                 {
-                    yield return new object[] { null, Fakes.FromAddress, Fakes.Package, Fakes.PackageUrl, "message", Fakes.EmailSettingsUrl, It.IsAny<bool>() };
-                    yield return new object[] { Configuration, null, Fakes.Package, Fakes.PackageUrl, "message", Fakes.EmailSettingsUrl, It.IsAny<bool>() };
-                    yield return new object[] { Configuration, Fakes.FromAddress, null, Fakes.PackageUrl, "message", Fakes.EmailSettingsUrl, It.IsAny<bool>() };
-                    yield return new object[] { Configuration, Fakes.FromAddress, Fakes.Package, null, "message", Fakes.EmailSettingsUrl, It.IsAny<bool>() };
-                    yield return new object[] { Configuration, Fakes.FromAddress, Fakes.Package, Fakes.PackageUrl, null, Fakes.EmailSettingsUrl, It.IsAny<bool>() };
-                    yield return new object[] { Configuration, Fakes.FromAddress, Fakes.Package, Fakes.PackageUrl, "message", null, It.IsAny<bool>() };
+                    yield return new object[] { null, Fakes.FromAddress, Fakes.Package, Fakes.PackageUrl, "message", Fakes.EmailSettingsUrl };
+                    yield return new object[] { Configuration, null, Fakes.Package, Fakes.PackageUrl, "message", Fakes.EmailSettingsUrl };
+                    yield return new object[] { Configuration, Fakes.FromAddress, null, Fakes.PackageUrl, "message", Fakes.EmailSettingsUrl };
+                    yield return new object[] { Configuration, Fakes.FromAddress, Fakes.Package, null, "message", Fakes.EmailSettingsUrl };
+                    yield return new object[] { Configuration, Fakes.FromAddress, Fakes.Package, Fakes.PackageUrl, null, Fakes.EmailSettingsUrl };
+                    yield return new object[] { Configuration, Fakes.FromAddress, Fakes.Package, Fakes.PackageUrl, "message", null };
                 }
             }
 
@@ -36,8 +35,7 @@ namespace NuGetGallery.Infrastructure.Mail.Messages
                 Package package,
                 string packageUrl,
                 string message,
-                string emailSettingsUrl,
-                bool copySender)
+                string emailSettingsUrl)
             {
                 Assert.Throws<ArgumentNullException>(() => new ContactOwnersMessage(
                     configuration,
@@ -57,7 +55,7 @@ namespace NuGetGallery.Infrastructure.Mail.Messages
                 var message = CreateMessage();
                 var recipients = message.GetRecipients();
 
-                Assert.Equal(1, recipients.To.Count);
+                Assert.Single(recipients.To);
                 Assert.Contains(Fakes.PackageOwnerWithEmailAllowed.ToMailAddress(), recipients.To);
                 Assert.DoesNotContain(Fakes.PackageOwnerWithEmailNotAllowed.ToMailAddress(), recipients.To);
             }
@@ -68,7 +66,7 @@ namespace NuGetGallery.Infrastructure.Mail.Messages
                 var message = CreateMessage();
                 var recipients = message.GetRecipients();
 
-                Assert.Equal(1, recipients.ReplyTo.Count);
+                Assert.Single(recipients.ReplyTo);
                 Assert.Contains(Fakes.FromAddress, recipients.ReplyTo);
             }
 
@@ -126,9 +124,9 @@ namespace NuGetGallery.Infrastructure.Mail.Messages
         }
 
         private const string _expectedMarkdownBody =
-            @"_User Sender &lt;sender@gallery.org&gt; sends the following message to the owners of Package '[PackageId 1.0.0](packageUrl)'._
+            @"User Sender &lt;sender@gallery.org&gt; sends the following message to the owners of Package '[PackageId 1.0.0](packageUrl)'.
 
-user input
+_user input_
 
 -----------------------------------------------
 <em style=""font-size: 0.8em;"">
@@ -146,8 +144,8 @@ user input
     change your email notification settings (emailSettingsUrl).";
 
         private const string _expectedHtmlBody =
-            "<p><em>User Sender &lt;sender@gallery.org&gt; sends the following message to the owners of Package '<a href=\"packageUrl\">PackageId 1.0.0</a>'.</em></p>\n" +
-"<p>user input</p>\n" +
+            "<p>User Sender &lt;sender@gallery.org&gt; sends the following message to the owners of Package '<a href=\"packageUrl\">PackageId 1.0.0</a>'.</p>\n" +
+"<p><em>user input</em></p>\n" +
 @"<hr />
 <em style=""font-size: 0.8em;"">
     To stop receiving contact emails as an owner of this package, sign in to the NuGetGallery and

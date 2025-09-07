@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -33,6 +33,7 @@ namespace NuGetGallery.Authentication
         private readonly IDateTimeProvider _dateTimeProvider;
         private readonly IContentObjectService _contentObjectService;
         private readonly ITelemetryService _telemetryService;
+        private readonly IFeatureFlagService _featureFlagService;
 
         /// <summary>
         /// This ctor is used for test only.
@@ -48,7 +49,7 @@ namespace NuGetGallery.Authentication
             IEntitiesContext entities, IAppConfiguration config, IDiagnosticsService diagnostics,
             IAuditingService auditing, IEnumerable<Authenticator> providers, ICredentialBuilder credentialBuilder,
             ICredentialValidator credentialValidator, IDateTimeProvider dateTimeProvider, ITelemetryService telemetryService,
-            IContentObjectService contentObjectService)
+            IContentObjectService contentObjectService, IFeatureFlagService featureFlagService)
         {
             InitCredentialFormatters();
 
@@ -62,6 +63,7 @@ namespace NuGetGallery.Authentication
             _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
             _telemetryService = telemetryService ?? throw new ArgumentNullException(nameof(telemetryService));
             _contentObjectService = contentObjectService ?? throw new ArgumentNullException(nameof(contentObjectService));
+            _featureFlagService = featureFlagService ?? throw new ArgumentNullException(nameof(featureFlagService));
         }
 
         public IEntitiesContext Entities { get; private set; }
@@ -82,6 +84,18 @@ namespace NuGetGallery.Authentication
             using (_trace.Activity("Authenticate"))
             {
                 var user = FindByUserNameOrEmail(userNameOrEmail);
+
+                if (!_featureFlagService.IsNuGetAccountPasswordLoginEnabled() &&
+                !_contentObjectService.LoginDiscontinuationConfiguration.IsEmailInExceptionsList(userNameOrEmail))
+                {
+                    _trace.Information("Password login unsupported.");
+
+                    await Auditing.SaveAuditRecordAsync(
+                        new FailedAuthenticatedOperationAuditRecord(
+                            userNameOrEmail, AuditedAuthenticatedOperationAction.PasswordLoginUnsupported));
+                    
+                    return new PasswordAuthenticationResult(PasswordAuthenticationResult.AuthenticationResult.PasswordLoginUnsupported);
+                }
 
                 // Check if the user exists
                 if (user == null)
@@ -164,7 +178,7 @@ namespace NuGetGallery.Authentication
             return FindMatchingApiKey(credential);
         }
 
-        public async Task RevokeApiKeyCredential(Credential apiKeyCredential, CredentialRevocationSource revocationSourceKey, bool commitChanges = true)
+        public virtual async Task RevokeApiKeyCredential(Credential apiKeyCredential, CredentialRevocationSource revocationSourceKey, bool commitChanges = true)
         {
             if (apiKeyCredential == null)
             {
@@ -345,7 +359,7 @@ namespace NuGetGallery.Authentication
                     .Where(cred => cred.IsExternal())
                     .Select(cred => cred.Identity)
                     .ToArray();
-                
+
                 var identityList = string.Join(" or ", externalIdentities);
                 ClaimsExtensions.AddExternalCredentialIdentityClaim(claims, identityList);
             }
@@ -365,7 +379,7 @@ namespace NuGetGallery.Authentication
             return claims.ToArray();
         }
 
-        public virtual async Task<AuthenticatedUser> Register(string username, string emailAddress, Credential credential, bool autoConfirm = false)
+        public virtual async Task<AuthenticatedUser> Register(string username, string emailAddress, Credential credential, bool autoConfirm = false, bool enableMultiFactorAuthentication = false)
         {
             if (_config.FeedOnlyMode)
             {
@@ -392,7 +406,8 @@ namespace NuGetGallery.Authentication
                 UnconfirmedEmailAddress = emailAddress,
                 EmailConfirmationToken = CryptographyService.GenerateToken(),
                 NotifyPackagePushed = true,
-                CreatedUtc = _dateTimeProvider.UtcNow
+                CreatedUtc = _dateTimeProvider.UtcNow,
+                EnableMultiFactorAuthentication = enableMultiFactorAuthentication
             };
 
             // Add a credential for the password
@@ -458,6 +473,9 @@ namespace NuGetGallery.Authentication
         {
             await ReplaceCredentialInternal(user, credential);
             await Entities.SaveChangesAsync();
+
+            await Auditing.SaveAuditRecordAsync(new UserAuditRecord(
+                user, AuditedUserAction.AddCredential, credential));
         }
 
         public virtual async Task<Credential> ResetPasswordWithToken(string username, string token, string newPassword)
@@ -486,6 +504,10 @@ namespace NuGetGallery.Authentication
                 user.FailedLoginCount = 0;
                 user.LastFailedLoginUtc = null;
                 await Entities.SaveChangesAsync();
+
+                await Auditing.SaveAuditRecordAsync(new UserAuditRecord(
+                    user, AuditedUserAction.AddCredential, cred));
+
                 return cred;
             }
 
@@ -562,7 +584,6 @@ namespace NuGetGallery.Authentication
         {
             var hasPassword = user.Credentials.Any(
                 c => c.Type.StartsWith(CredentialTypes.Password.Prefix, StringComparison.OrdinalIgnoreCase));
-            Credential _;
             if (hasPassword && !ValidatePasswordCredential(user.Credentials, oldPassword, out _))
             {
                 // Invalid old password!
@@ -575,6 +596,10 @@ namespace NuGetGallery.Authentication
 
             // Save changes
             await Entities.SaveChangesAsync();
+
+            await Auditing.SaveAuditRecordAsync(new UserAuditRecord(
+                user, AuditedUserAction.AddCredential, passwordCredential));
+
             return true;
         }
 
@@ -608,10 +633,10 @@ namespace NuGetGallery.Authentication
                 throw new InvalidOperationException(ServicesStrings.OrganizationsCannotCreateCredentials);
             }
 
-            await Auditing.SaveAuditRecordAsync(new UserAuditRecord(user, AuditedUserAction.AddCredential, credential));
             user.Credentials.Add(credential);
             await Entities.SaveChangesAsync();
 
+            await Auditing.SaveAuditRecordAsync(new UserAuditRecord(user, AuditedUserAction.AddCredential, credential));
             _telemetryService.TrackNewCredentialCreated(user, credential);
         }
 
@@ -635,6 +660,12 @@ namespace NuGetGallery.Authentication
                 }
             }
 
+            var isDeprecateApiEnabled = _featureFlagService != null && credential
+                .Scopes
+                .Select(s => s.Owner ?? credential.User)
+                .Where(u => u != null)
+                .Any(_featureFlagService.IsManageDeprecationApiEnabled);
+
             var credentialViewModel = new CredentialViewModel
             {
                 Key = credential.Key,
@@ -649,7 +680,7 @@ namespace NuGetGallery.Authentication
                 Scopes = credential.Scopes.Select(s => new ScopeViewModel(
                         s.Owner?.Username ?? credential.User.Username,
                         s.Subject,
-                        NuGetScopes.Describe(s.AllowedAction)))
+                        NuGetScopes.Describe(s.AllowedAction, isDeprecateApiEnabled)))
                     .ToList(),
                 ExpirationDuration = credential.ExpirationTicks != null ? new TimeSpan?(new TimeSpan(credential.ExpirationTicks.Value)) : null,
                 RevocationSource = credential.RevocationSourceKey != null ? Enum.GetName(typeof(CredentialRevocationSource), credential.RevocationSourceKey) : null,
@@ -683,7 +714,7 @@ namespace NuGetGallery.Authentication
 
         public virtual async Task EditCredentialScopes(User user, Credential cred, ICollection<Scope> newScopes)
         {
-            foreach (var oldScope in cred.Scopes.ToArray())
+            foreach (var oldScope in cred.Scopes.ToList())
             {
                 Entities.Scopes.Remove(oldScope);
             }
@@ -799,7 +830,7 @@ namespace NuGetGallery.Authentication
             Func<Credential, bool> replacingPredicate;
             if (!string.IsNullOrEmpty(replaceCredPrefix))
             {
-                 replacingPredicate = cred => cred.Type.StartsWith(replaceCredPrefix, StringComparison.OrdinalIgnoreCase);
+                replacingPredicate = cred => cred.Type.StartsWith(replaceCredPrefix, StringComparison.OrdinalIgnoreCase);
             }
             else
             {
@@ -807,7 +838,7 @@ namespace NuGetGallery.Authentication
             }
 
             var toRemove = user.Credentials
-                .Where(replacingPredicate) 
+                .Where(replacingPredicate)
                 .ToList();
 
             foreach (var cred in toRemove)
@@ -823,9 +854,6 @@ namespace NuGetGallery.Authentication
             }
 
             user.Credentials.Add(credential);
-
-            await Auditing.SaveAuditRecordAsync(new UserAuditRecord(
-                user, AuditedUserAction.AddCredential, credential));
         }
 
         private static CredentialKind GetCredentialKind(string type)
@@ -891,7 +919,7 @@ namespace NuGetGallery.Authentication
                 .Include(u => u.User.Roles)
                 .Include(u => u.Scopes);
 
-            var results = _credentialValidator.GetValidCredentialsForApiKey(allCredentials, apiKeyCredential.Value);
+            var results = _credentialValidator.GetValidCredentialsForApiKey(allCredentials, apiKeyCredential.Value, _config.Environment);
 
             return ValidateFoundCredentials(results, ServicesStrings.CredentialType_ApiKey);
         }
@@ -1009,15 +1037,20 @@ namespace NuGetGallery.Authentication
             await Auditing.SaveAuditRecordAsync(new UserAuditRecord(user, AuditedUserAction.RemoveCredential, toRemove));
 
             // Now add one if there are no credentials left
+            Credential newCred = null;
             if (creds.Count == 0)
             {
-                var newCred = _credentialBuilder.CreatePasswordCredential(password);
-                await Auditing.SaveAuditRecordAsync(new UserAuditRecord(user, AuditedUserAction.AddCredential, newCred));
+                newCred = _credentialBuilder.CreatePasswordCredential(password);
                 user.Credentials.Add(newCred);
             }
 
             // Save changes, if any
             await Entities.SaveChangesAsync();
+
+            if (newCred != null)
+            {
+                await Auditing.SaveAuditRecordAsync(new UserAuditRecord(user, AuditedUserAction.AddCredential, newCred));
+            }
         }
     }
 }

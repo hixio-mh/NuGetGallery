@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -75,6 +75,7 @@ namespace NuGetGallery.Controllers
                 new ControllerActionRuleException(typeof(ApiController), nameof(ApiController.PublishPackage)),
                 new ControllerActionRuleException(typeof(ApiController), nameof(ApiController.DeprecatePackage)),
                 new ControllerActionRuleException(typeof(PackagesController), nameof(PackagesController.DisplayPackage)),
+                new ControllerActionRuleException(typeof(TokenApiController), nameof(TokenApiController.CreateToken)),
             };
 
             // Act
@@ -159,7 +160,7 @@ namespace NuGetGallery.Controllers
 
             // Only certain actions should support discontinued password login
             var actionsSupportingDiscontinuedLogins = actions
-                .Where(m => m.GetCustomAttributes().Any(a => a is UIAuthorizeAttribute && ((UIAuthorizeAttribute)a).AllowDiscontinuedLogins))
+                .Where(m => m.GetCustomAttributes().Any(a => a is UIAuthorizeAttribute attribute && attribute.AllowDiscontinuedLogins))
                 .Select(m => new ControllerActionRuleException(m))
                 .Distinct();
 

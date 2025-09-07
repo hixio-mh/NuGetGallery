@@ -3,7 +3,6 @@
 using System;
 using System.Net;
 using System.Web.UI;
-using NuGetGallery;
 
 namespace NuGetGallery.Areas.Admin.DynamicData
 {
@@ -17,7 +16,7 @@ namespace NuGetGallery.Areas.Admin.DynamicData
                 Response.End();
             }
 
-            if (!Request.IsLocal && !Page.User.IsAdministrator())
+            if ((!Request.IsLocal && !Page.User.IsAdministrator()) || !AdminHelper.IsAdminPanelEnabled)
             {
                 Response.StatusCode = (int)HttpStatusCode.Forbidden;
                 Response.End();

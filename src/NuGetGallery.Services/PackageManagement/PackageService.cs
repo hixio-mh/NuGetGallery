@@ -1,31 +1,40 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
-using System.Data.Common;
 using System.Data.Entity;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Helpers;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NuGet.Frameworks;
 using NuGet.Packaging;
 using NuGet.Packaging.Core;
 using NuGet.Services.Entities;
 using NuGet.Versioning;
 using NuGetGallery.Auditing;
+using NuGetGallery.Helpers;
 using NuGetGallery.Packaging;
 using NuGetGallery.Security;
+using NuGetGallery.Services.Helpers;
+using PackageType = NuGet.Services.Entities.PackageType;
 
 namespace NuGetGallery
 {
     public class PackageService : CorePackageService, IPackageService
     {
+        private const string MarkdownFileExtension = ".md";
+
         private readonly IAuditingService _auditingService;
         private readonly ITelemetryService _telemetryService;
         private readonly ISecurityPolicyService _securityPolicyService;
         private readonly IEntitiesContext _entitiesContext;
+        private readonly IContentObjectService _contentObjectService;
+        private readonly IFeatureFlagService _featureFlagService;
         private const int packagesDisplayed = 5;
 
         public PackageService(
@@ -35,13 +44,17 @@ namespace NuGetGallery
             IAuditingService auditingService,
             ITelemetryService telemetryService,
             ISecurityPolicyService securityPolicyService,
-            IEntitiesContext entitiesContext)
+            IEntitiesContext entitiesContext,
+            IContentObjectService contentObjectService,
+            IFeatureFlagService featureFlagService)
             : base(packageRepository, packageRegistrationRepository, certificateRepository)
         {
             _auditingService = auditingService ?? throw new ArgumentNullException(nameof(auditingService));
             _telemetryService = telemetryService ?? throw new ArgumentNullException(nameof(telemetryService));
             _securityPolicyService = securityPolicyService ?? throw new ArgumentNullException(nameof(securityPolicyService));
             _entitiesContext = entitiesContext ?? throw new ArgumentNullException(nameof(entitiesContext));
+            _contentObjectService = contentObjectService ?? throw new ArgumentNullException(nameof(contentObjectService));
+            _featureFlagService = featureFlagService ?? throw new ArgumentNullException(nameof(featureFlagService));
         }
 
         /// <summary>
@@ -153,10 +166,41 @@ namespace NuGetGallery
             {
                 throw new ArgumentNullException(nameof(id));
             }
-            
+
             PackageDependents result = new PackageDependents();
-            result.TopPackages = GetListOfDependents(id);
-            result.TotalPackageCount = GetDependentCount(id);
+
+            // We use OPTIMIZE FOR UNKNOWN by default here because there are distinct 2-3 query plans that may be
+            // selected via SQL Server parameter sniffing. Because SQL Server caches query plans, this means that the
+            // first parameter plus query combination that SQL sees defines which query plan is selected and cached for
+            // all subsequent parameter values of the same query. This could result in a non-optimal query plan getting
+            // cached depending on what package ID is viewed first. Using OPTIMIZE FOR UNKNOWN causes a predictable
+            // query plan to be cached.
+            // 
+            // For example, the query plan for Newtonsoft.Json is very good for that specific parameter value since
+            // there are so many package dependents but the same query plan takes a very long time for packages with few
+            // or no dependents. The query plan for "UNKNOWN" (that is a package ID with unknown SQL Server statistic)
+            // behaves somewhat poorly for Newtonsoft.Json (2-5 seconds) but very well for the vast majority of
+            // packages. Because we have in-memory caching above this layer, OPTIMIZE FOR UNKNOWN is acceptable other
+            // unconfigured cases similar to Newtonsoft.Json because the extra cost of the non-optimal query plan is
+            // amortized over many, many page views. For the long tail packages, in-memory caching is less effective
+            // (low page views) so an optimal query should be selected for this category.
+            //
+            // For the cases where RECOMPILE is known to perform the best, the package ID can be added to the query hint
+            // configuration JSON file from the content object service. This should only be done when the following
+            // things are true:
+            //
+            //   1. The overhead of SQL Server recompile is worth it. We have seen the overhead to be 5-50ms.
+            //   2. SQL Server has up to date statistics which will lead to the proper query plan being selected.
+            //   3. SQL Server actually picks the proper query plan. We have observed cases where this does not happen
+            //      even with up-to-date statistics.
+            //
+            var useRecompile = _contentObjectService.QueryHintConfiguration.ShouldUseRecompileForPackageDependents(id);
+            using (_entitiesContext.WithQueryHint(useRecompile ? "RECOMPILE" : "OPTIMIZE FOR UNKNOWN"))
+            {
+                result.TopPackages = GetListOfDependents(id);
+                result.TotalPackageCount = GetDependentCount(id);
+            }
+
             return result;
         }
 
@@ -200,8 +244,33 @@ namespace NuGetGallery
                 includePackageRegistration: includePackageRegistration,
                 includeUser: false,
                 includeSymbolPackages: false,
-                includeDeprecation: false,
-                includeDeprecationRelationships: false);
+                includeDeprecations: false,
+                includeDeprecationRelationships: false,
+                includeSupportedFrameworks: false);
+
+            return packages.ToList();
+        }
+
+        public IReadOnlyCollection<Package> FindPackagesById(
+            string id,
+            bool includePackageRegistration,
+            bool includeDeprecations,
+            bool includeSupportedFrameworks)
+        {
+            if (id == null)
+            {
+                throw new ArgumentNullException(nameof(id));
+            }
+
+            var packages = GetPackagesByIdQueryable(
+                id,
+                includeLicenseReports: false,
+                includePackageRegistration: includePackageRegistration,
+                includeUser: false,
+                includeSymbolPackages: false,
+                includeDeprecations: includeDeprecations,
+                includeDeprecationRelationships: false,
+                includeSupportedFrameworks: includeSupportedFrameworks);
 
             return packages.ToList();
         }
@@ -278,7 +347,7 @@ namespace NuGetGallery
                 var semvered = localPackages
                     .Select(package => new {package, semVer= NuGetVersion.Parse(package.NormalizedVersion)})
                     .ToList();
-                
+
                 return semvered
                     .Where(d => d.semVer.IsPrerelease == prerelease || !applyPrereleaseFilter)
                     .OrderByDescending(d => d.semVer)
@@ -299,13 +368,13 @@ namespace NuGetGallery
                         .FirstOrDefault();
                 }
             }
-            
+
             Package GetLatestPrerelease()
             {
                 return GetSortedFiltered(packages)
                     .FirstOrDefault();
             }
-            
+
             Package GetLatestStable()
             {
                 return GetSortedFiltered(packages, false)
@@ -383,6 +452,62 @@ namespace NuGetGallery
             return GetPackagesForOwners(ownerKeys, includeUnlisted, includeVersions);
         }
 
+        public (IReadOnlyCollection<Package> Packages, long TotalDownloadCount, int PackageCount) FindPackagesByProfile(
+            User user,
+            int page,
+            int pageSize)
+        {
+            if (user == null)
+            {
+                throw new ArgumentNullException(nameof(user));
+            }
+
+            IQueryable<Package> packages = _packageRepository.GetAll()
+                .Where(p => p.PackageRegistration.Owners.Any(o => o.Key == user.Key));
+
+            var packageSummary = packages
+                .Where(p => p.IsLatestSemVer2)
+                .Include(p => p.PackageRegistration)
+                .GroupBy(r => 1)
+                .Select(g => new
+                {
+                    PackageCount = g.Sum(x => 1),
+                    DownloadCount = g.Sum(x => x.PackageRegistration.DownloadCount)
+                })
+                .FirstOrDefault();
+
+            var packageCount = packageSummary != null ? packageSummary.PackageCount : 0;
+            var downloadCount = packageSummary != null ? packageSummary.DownloadCount : 0;
+
+            if (!_featureFlagService.IsProfileLoadOptimizationV2Enabled())
+            {
+                packages = packages
+                    .Where(p => p.Listed
+                        && p.PackageStatusKey == PackageStatus.Available);
+
+                packages = GetLatestVersion(packages);
+            }
+            else
+            {
+                packages = packages.Where(p => p.IsLatestSemVer2);
+            }
+
+            packages = packages
+                .OrderByDescending(p => p.PackageRegistration.DownloadCount)
+                .ThenBy(p => p.PackageRegistration.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Include(p => p.PackageRegistration.Owners);
+
+            if (!_featureFlagService.IsProfileLoadOptimizationV2Enabled())
+            {
+                packages = packages
+                    .Include(p => p.PackageRegistration.RequiredSigners);
+            }
+
+            return (packages.ToList(), downloadCount, packageCount);
+        }
+
         private IEnumerable<Package> GetPackagesForOwners(IEnumerable<int> ownerKeys, bool includeUnlisted, bool includeVersions)
         {
             IQueryable<Package> packages = _packageRepository.GetAll()
@@ -395,20 +520,7 @@ namespace NuGetGallery
 
             if (!includeVersions)
             {
-                // Do a best effort of retrieving the latest version. Note that UpdateIsLatest has had concurrency issues
-                // where sometimes packages no rows with IsLatest set. In this case, we'll just select the last inserted
-                // row (descending [Key]) as opposed to reading all rows into memory and sorting on NuGetVersion.
-                packages = packages
-                    .GroupBy(p => p.PackageRegistrationKey)
-                    .Select(g => g
-                        // order booleans desc so that true (1) comes first
-                        .OrderByDescending(p => p.IsLatestStableSemVer2)
-                        .ThenByDescending(p => p.IsLatestStable)
-                        .ThenByDescending(p => p.IsLatestSemVer2)
-                        .ThenByDescending(p => p.IsLatest)
-                        .ThenByDescending(p => p.Listed)
-                        .ThenByDescending(p => p.Key)
-                        .FirstOrDefault());
+                packages = GetLatestVersion(packages);
             }
 
             return packages
@@ -416,6 +528,25 @@ namespace NuGetGallery
                 .Include(p => p.PackageRegistration.Owners)
                 .Include(p => p.PackageRegistration.RequiredSigners)
                 .ToList();
+        }
+
+        private static IQueryable<Package> GetLatestVersion(IQueryable<Package> packages)
+        {
+            // Do a best effort of retrieving the latest versions. Note that UpdateIsLatest has had concurrency issues
+            // where sometimes packages no rows with IsLatest set. In this case, we'll just select the last inserted
+            // row (descending [Key]) as opposed to reading all rows into memory and sorting on NuGetVersion.
+            packages = packages
+                .GroupBy(p => p.PackageRegistrationKey)
+                .Select(g => g
+                    // order booleans desc so that true (1) comes first
+                    .OrderByDescending(p => p.IsLatestStableSemVer2)
+                    .ThenByDescending(p => p.IsLatestStable)
+                    .ThenByDescending(p => p.IsLatestSemVer2)
+                    .ThenByDescending(p => p.IsLatest)
+                    .ThenByDescending(p => p.Listed)
+                    .ThenByDescending(p => p.Key)
+                    .FirstOrDefault());
+            return packages;
         }
 
         public IQueryable<PackageRegistration> FindPackageRegistrationsByOwner(User user)
@@ -583,6 +714,8 @@ namespace NuGetGallery
             PackageStreamMetadata packageStreamMetadata,
             User user)
         {
+            package.Id = packageMetadata.Id;
+
             // Version must always be the exact string from the nuspec, which OriginalVersion will return to us.
             // However, we do also store a normalized copy for looking up later.
             package.Version = packageMetadata.Version.OriginalVersion;
@@ -618,23 +751,17 @@ namespace NuGetGallery
                 package.Authors.Add(new PackageAuthor { Name = author });
             }
 #pragma warning restore 618
-
-            var supportedFrameworks = GetSupportedFrameworks(packageArchive)
+            
+            var supportedFrameworkNames = GetSupportedFrameworks(packageArchive)
+                .Select(fn => fn.GetShortFolderName())
+                .Where(fn => fn != null)
                 .ToArray();
 
-            if (!supportedFrameworks.Any(fx => fx != null && fx.IsAny))
+            ValidateSupportedFrameworks(supportedFrameworkNames);
+
+            foreach (var supportedFramework in supportedFrameworkNames)
             {
-                var supportedFrameworkNames = supportedFrameworks
-                                .Select(fn => fn.ToShortNameOrNull())
-                                .Where(fn => fn != null)
-                                .ToArray();
-
-                ValidateSupportedFrameworks(supportedFrameworkNames);
-
-                foreach (var supportedFramework in supportedFrameworkNames)
-                {
-                    package.SupportedFrameworks.Add(new PackageFramework { TargetFramework = supportedFramework });
-                }
+                package.SupportedFrameworks.Add(new PackageFramework { TargetFramework = supportedFramework });
             }
 
             package.Dependencies = packageMetadata
@@ -642,14 +769,22 @@ namespace NuGetGallery
                 .AsPackageDependencyEnumerable()
                 .ToList();
 
-            package.PackageTypes = packageMetadata
+            var uniquePackageTypes = packageMetadata
                 .GetPackageTypes()
                 .AsPackageTypeEnumerable()
+                .Distinct()
                 .ToList();
+
+            if (McpHelper.IsMcpServerPackage(packageArchive))
+            {
+                uniquePackageTypes = EnrichMcpServerMetadata(packageArchive, uniquePackageTypes);
+            }
+
+            package.PackageTypes = uniquePackageTypes;
 
             package.FlattenedDependencies = package.Dependencies.Flatten();
 
-            package.FlattenedPackageTypes = package.PackageTypes.Flatten();
+            package.FlattenedPackageTypes = uniquePackageTypes.Flatten();
 
             // Identify the SemVerLevelKey using the original package version string and package dependencies
             package.SemVerLevelKey = SemVerLevelKey.ForPackage(packageMetadata.Version, package.Dependencies);
@@ -657,13 +792,30 @@ namespace NuGetGallery
             package.EmbeddedLicenseType = GetEmbeddedLicenseType(packageMetadata);
             package.LicenseExpression = GetLicenseExpression(packageMetadata);
             package.HasEmbeddedIcon = !string.IsNullOrWhiteSpace(packageMetadata.IconFile);
+            package.HasReadMe = !string.IsNullOrWhiteSpace(packageMetadata.ReadmeFile);
+            package.EmbeddedReadmeType = GetEmbeddedReadmeType(packageMetadata);
 
             return package;
         }
 
         public virtual IEnumerable<NuGetFramework> GetSupportedFrameworks(PackageArchiveReader package)
         {
+            if (_featureFlagService.ArePatternSetTfmHeuristicsEnabled())
+            {
+                return GetSupportedFrameworks(package.NuspecReader, PackageValidationHelper.GetNormalizedEntryPaths(package));
+            }
+
             return package.GetSupportedFrameworks();
+        }
+
+        public virtual IEnumerable<NuGetFramework> GetSupportedFrameworks(NuspecReader nuspecReader, IList<string> packageFiles)
+        {
+            if (nuspecReader != null)
+            {
+                return AssetFrameworkHelper.GetAssetFrameworks(nuspecReader.GetId(), nuspecReader.GetPackageTypes(), packageFiles);
+            }
+
+            return Enumerable.Empty<NuGetFramework>();
         }
 
         private static EmbeddedLicenseFileType GetEmbeddedLicenseType(PackageMetadata packageMetadata)
@@ -688,7 +840,6 @@ namespace NuGetGallery
 
         private static EmbeddedLicenseFileType GetEmbeddedLicenseType(string licenseFileName)
         {
-            const string MarkdownFileExtension = ".md";
             const string TextFileExtension = ".txt";
 
             var extension = Path.GetExtension(licenseFileName);
@@ -706,6 +857,23 @@ namespace NuGetGallery
             throw new ArgumentException($"Invalid file name: {licenseFileName}");
         }
 
+        private static EmbeddedReadmeFileType GetEmbeddedReadmeType(PackageMetadata packageMetadata)
+        {
+            if (packageMetadata.ReadmeFile == null)
+            {
+                return EmbeddedReadmeFileType.Absent;
+            }
+
+            var extension = Path.GetExtension(packageMetadata.ReadmeFile);
+
+            if (MarkdownFileExtension.Equals(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                return EmbeddedReadmeFileType.Markdown;
+            }
+
+            throw new ArgumentException($"The file name for the package readme must have the \"md\" file extension: {packageMetadata.ReadmeFile}");
+        }
+
         private static void ValidateSupportedFrameworks(string[] supportedFrameworks)
         {
             // Frameworks within the portable profile are not allowed to have profiles themselves.
@@ -720,6 +888,33 @@ namespace NuGetGallery
                 throw new EntityException(
                     ServicesStrings.InvalidPortableFramework, invalidPortableFramework);
             }
+        }
+
+        private static List<PackageType> EnrichMcpServerMetadata(PackageArchiveReader packageArchive, List<PackageType> packageTypes)
+        {
+            if (!McpHelper.PackageContainsMcpServerMetadata(packageArchive))
+            {
+                return packageTypes;
+            }
+
+            var metadataJson = McpHelper.ReadMcpServerMetadata(packageArchive);
+            var mcpPackageType = packageTypes
+                .FirstOrDefault(pt => pt.Name.Equals(McpHelper.McpServerPackageTypeName, StringComparison.OrdinalIgnoreCase));
+
+            if (mcpPackageType != null)
+            {
+                try
+                {
+                    var parsedMetadata = JToken.Parse(metadataJson);
+                    mcpPackageType.CustomData = parsedMetadata.ToString(Formatting.None);
+                }
+                catch (JsonReaderException)
+                {
+                    return packageTypes;
+                }
+            }
+
+            return packageTypes;
         }
 
         public async Task SetLicenseReportVisibilityAsync(Package package, bool visible, bool commitChanges = true)
@@ -891,6 +1086,21 @@ namespace NuGetGallery
 
                 _telemetryService.TrackRequiredSignerSet(registration.Id);
             }
+        }
+
+        public PackageStatus? GetPackageStatus(string packageId, NuGetVersion packageVersion)
+        {
+            var normalizedVersion = packageVersion.ToNormalizedString();
+
+            // Note the casting to a nullable enum in the "Select". This is required to
+            // return "null" if there are no rows. Otherwise, "FirstOrDefault" would return
+            // "PackageStatus.Available" as the default value.
+            return _packageRepository
+                .GetAll()
+                .Where(p => p.PackageRegistration.Id == packageId)
+                .Where(p => p.Version == normalizedVersion)
+                .Select(p => (PackageStatus?)p.PackageStatusKey)
+                .FirstOrDefault();
         }
     }
 }

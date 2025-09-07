@@ -4,7 +4,6 @@
 using System;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 
 namespace NuGetGallery
 {
@@ -70,16 +69,29 @@ namespace NuGetGallery
         }
 
         /// <summary>
+        /// Format the number of bytes into a user-friendly display label.
+        /// </summary>
+        /// <param name="bytes"></param>
+        /// <returns></returns>
+        public static string ToUserFriendlyBytesLabel(this int bytes)
+            => ToUserFriendlyBytesLabel((long)bytes);
+
+        /// <summary>
         /// Format the number to a 1 decimal precision plus a letter to represent the scale (K for kilo, M for mega, or B for billion)
         /// </summary>
         /// <param name="number">The number to format</param>
         /// <returns>String representation of the formatted number</returns>
         public static string ToKiloFormat(this int number)
         {
+            return ToKiloFormat((long)number);
+        }
+
+        public static string ToKiloFormat(this long number)
+        {
             // To avoid overflow (with Math.Abs()). 1 difference won't make a difference in the simplified format :)
-            if (number == int.MinValue)
+            if (number == long.MinValue)
             {
-                number = -1 * int.MaxValue;
+                number = -1 * long.MaxValue;
             }
 
             if (Math.Abs(number) < 1000)
@@ -89,9 +101,10 @@ namespace NuGetGallery
 
             var powers = new[]
             {
-                new { Value = 1_000_000_000f, Unit = 'B'},
-                new { Value = 1_000_000f    , Unit = 'M'},
-                new { Value = 1_000f        , Unit = 'K'}
+                new { Value = 1_000_000_000_000f, Unit = 'T'},
+                new { Value = 1_000_000_000f    , Unit = 'B'},
+                new { Value = 1_000_000f        , Unit = 'M'},
+                new { Value = 1_000f            , Unit = 'K'}
             };
 
             return powers

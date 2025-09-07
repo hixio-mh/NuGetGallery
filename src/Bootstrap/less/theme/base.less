@@ -1,16 +1,82 @@
 //== Theme Variables
 @panel-footer-color:  @navbar-inverse-color;
 @default-margin-bottom: 24px;
+@package-list-line-height: 20px;
 
-//== Theme Definition
-html, body {
-  width: 100%;
-  height: 100%;
+.nuget-logo-image {
+  background-image: var(--nuget-logo-background-image);
+  background-repeat: no-repeat;
+  width: 94px;
+  height: 29px;
+  background-size: auto;
+  background-size: 94px 29px;
+}
+
+.home-link {
+  display: block;
+
+  &:focus-within {
+    outline: 4px solid var(--neutralStrokeFocus2Rest);
+    border-radius: 4px;
+  }
+}
+
+.nuget-logo-footer {
+  background-image: var(--nuget-logo-background-image);
+  background-repeat: no-repeat;
+  width: 184px;
+  height: 57px;
+  background-size: auto;
+  background-size: 184px 57px;
+}
+
+h1 {
+  color: var(--neutralForeground1Rest, @jumbotron-heading-color);
+
+  /* Web/Large Title */
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 52px; /* 130% */
+}
+
+h2 {
+  color: var(--neutralForeground1Rest);
+  display: flex;
+
+  /* Web/Title 1 */
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 40px; /* 125% */
+}
+
+p {
+  color: var(--neutralForeground1Rest);
+
+  /* Web/Body 2 */
+  font-size: 16px;
+  font-weight: 400;
+}
+
+label {
+  color: var(--neutralForeground1Rest);
+}
+
+.home-icons {
+  width: fit-content;
+  margin: auto;
+  padding: 60px;
+  border-radius: 300px;
+  background: var(--gradients-light-theme-blue-purple-primary, linear-gradient(129deg, #0B6CFF 14.05%, #512BD4 89.3%));
+
+  .open-book {
+    background-image: url('../img/book-open-icon.svg');
+  }
 }
 
 body {
   display: table;
-
+  background: var(--neutralBackground2Rest);
+  
   h1, h2, h3, p {
     margin-bottom: @default-margin-bottom;
   }
@@ -23,8 +89,8 @@ body {
 #autocomplete-results-container {
   position: absolute;
   z-index: 1;
-  background-color: white;
-  border: 1px solid black;
+  background-color: var(--neutralBackground2Rest);
+  border: 1px solid var(--neutralStroke1Rest);
   display: none;
   left: 0;
   right: 0;
@@ -54,30 +120,62 @@ body {
   }
 }
 
+.form-inline-empty {
+  display: inline-block;
+}
+
 .footer {
-  background-color: @panel-footer-bg;
-  color: @panel-footer-color;
+  background-color: transparent;
+  color: var(--neutralForeground1Rest);
   font-size: 1em;
   display: table-row;
   height: 1px;
 
+  span {
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 28px;
+  }
+
   .footer-heading {
-    display: block;
     margin-bottom: 11px;
-    font-size: @font-size-h4;
+
+    a {
+      color: var(--neutralForeground1Rest);
+
+      &:hover {
+        color: var(--neutralForeground1Hover);
+        text-decoration: underline;
+      }
+
+      &:focus {
+        outline: 3px solid var(--neutralStrokeFocus2Rest);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+    }
   }
 
   .container {
     margin-top: 50px;
     margin-bottom: 50px;
 
-    // This is a workaround for the following bug:
-    // https://github.com/microsoft/accessibility-insights-web/issues/692
-    background-color: @panel-footer-bg;
+    background-color: transparent;
   }
 
-  a {
-    color: @panel-footer-color;
+  .footer-release-info a {
+    color: var(--neutralForeground2LinkRest);
+    text-decoration: underline;
+
+    &:hover {
+      color: var(--neutralForeground2LinkHover);
+    }
+
+    &:focus {
+      outline: 3px solid var(--neutralStrokeFocus2Rest);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
   }
 
   .footer-release-info {
@@ -108,6 +206,13 @@ body {
 .main-container {
   padding-bottom: 75px;
   height: auto;
+
+  a[href] {
+    &:focus {
+      outline: solid 2px;
+      outline-offset: 1px;
+    }
+  }
 }
 
 .navbar-logo {
@@ -157,8 +262,9 @@ body {
     line-height: 1.4;
 
     > span {
-      border-bottom: 1px solid #d8d8d8;
+      border-bottom: 1px solid var(--neutralForeground1Rest);
       margin-bottom: 3px;
+      text-decoration: none;
     }
   }
 }
@@ -166,7 +272,7 @@ body {
 .dependency-group {
 
   li span {
-    color: #666;
+    color: var(--neutralForeground1Rest);
   }
 }
 
@@ -185,21 +291,23 @@ body {
 }
 
 .tag {
-  color: @link-color-darker;
-  background-color: #eff9ff;
+  color: var(--brandForeground2Rest);
+  background: var(--brandBackground2Rest);
+  border-radius: 4px;
   padding: 2px 10px;
   line-height: 2em;
   margin: 0 2px;
 
   &:hover,
   &:focus {
-    color: @link-hover-color;
+    color: var(--brandForeground1Hover);
   }
 }
 
 .banner {
   padding-bottom: 10px;
   padding-top: 5px;
+  color: var(--neutralForegroundStaticRest);
 
   span {
     font-size: 1.25em;
@@ -212,11 +320,12 @@ body {
   }
 
   a {
-    color: @link-hover-color;
+    color: var(--brandForegroundLinkRest);
+    text-decoration: underline;
   }
 
   a:hover, a:focus {
-    color: darken(@link-hover-color, 15%);
+    color: var(--brandForegroundLinkHover)
   }
 
   &.banner-bright {
@@ -230,33 +339,37 @@ body {
   &.banner-info {
     background: @info-bg;
   }
-  
-  &.banner-blm {
-    background-color: #000;
-    color: #fff;
-  }
 }
 
 .alert {
   a {
-    color: @link-color-darker;
+    color: var(--brandForegroundLinkRest);
 
     &:hover,
     &:focus {
-      color: @link-hover-color;
+      color: var(--brandForegroundLinkHover);
     }
   }
+}
+
+.row-checkbox-label {
+  display: flex;
+  gap: 10px;
 }
 
 .alert-transient {
   .alert {
     margin: 0;
     padding: 10px;
-  } 
+  }
+}
+
+a {
+  color: var(--brandForegroundLinkRest);
 }
 
 .alert-transient-jumbotron {
-  background-color: #004880
+  background: transparent;
 }
 
 .ms-Icon-ul {
@@ -264,7 +377,7 @@ body {
 
   li {
     position: relative;
-    
+
     i.ms-Icon {
       position: absolute;
       left: -24px;
@@ -280,7 +393,7 @@ h2, h3 {
   }
 
   a, a:hover, a:focus, a:active {
-    color: @text-color;
+    color: var(--neutralForeground1Rest);
     text-decoration: none;
   }
 }
@@ -289,11 +402,12 @@ h2, h3 {
   .container {
     // Bootstrap doesn't set the container width when the screen is xs.
     // This works fine when there are no elements in the container that are wider than the viewport,
-    // however, if there are elements in the container that are wider than the viewport, 
+    // however, if there are elements in the container that are wider than the viewport,
     // their overflow properties will not work properly because they are not bound by the size of the container.
     // To fix this, we need to set the container width to be the width of the viewport minus the row margin on xs screens.
     // This way, those elements that are larger than the viewport are properly bound by the size of the container and overflow properly.
-    width: calc(100vw - 15px);
+    // 2020.10.27: We actually need to set it slightly smaller than the row margin as a horizontal scrollbar appears at xs when exactly matched.
+    width: calc(100vw - 20px);
   }
 
   .navbar-toggle {
@@ -322,34 +436,83 @@ img.reserved-indicator-icon {
   margin-right: auto;
 }
 
+.table-container {
+  overflow-x: auto;
+}
+
 .package-list {
   margin-top: 8px;
   margin-bottom: 8px;
-  margin-left: -5px;
   padding-left: 0;
-  line-height: 20px;
-  color: @gray-light;
+  line-height: @package-list-line-height;
+  color: var(--neutralForeground1Rest);
 
-  a {
-    color: @gray-light;
+  i {
+    color: var(--neutralForeground3Rest);
   }
 
   li {
     list-style: none;
     display: list-item;
+
+    a {
+      &:focus {
+        outline: solid 0.25px;
+        outline-offset: 0;
+      }
+    }
+  }
+
+  li.package-warning-indicators {
+    display: block;
+    overflow-y: visible;
+    margin-bottom: 5px;
+    font-size: 14px;
+  }
+
+  li.package-tfm-badges {
+    display: block;
+    overflow-y: visible;
+
+    .framework-badges {
+      margin-bottom: 2px;
+
+      .framework-badge-computed {
+        color: var(--brandForeground2Rest);
+        border-radius: 4px;
+        border: 1px solid var(--transparentStrokeRest);
+        height: 24px;
+      }
+
+      .framework-badge-asset {
+        align-items: normal;
+        display: inline-flex;
+        color: var(--neutralForegroundOnBrandRest);
+        border-radius: 4px;
+        border: 1px solid var(--transparentStrokeRest);
+        height: 24px;
+      }
+
+      @media (max-width: @screen-sm-min) {
+        a + a {
+          margin-bottom: 4px;
+        }
+      }
+    }
   }
 
   @media (min-width: @screen-sm-min) {
     li {
       display: inline-block;
+      line-height: @package-list-line-height;
+      max-height: (@package-list-line-height * 5 + 1px);
+      overflow-y: hidden;
+      padding-right: @padding-small-horizontal;
     }
 
-    li + li {
-      margin-left: @padding-small-horizontal;
-      padding-left: @padding-small-horizontal;
-      border-left-style: solid;
-      border-width: 1px;
-      border-color: @gray-lighter;
+    li.package-tags {
+      display: block;
+      overflow-y: visible;
     }
   }
 }
@@ -386,16 +549,21 @@ img.reserved-indicator-icon {
   line-height:0;
   height: 0;
   overflow: hidden;
+  color: var(--neutralForeground1Rest);
 }
 
 .showOnFocus:focus {
   line-height:2em;
   height: 2em;
-  color: @navbar-inverse-color;
+  color: var(--neutralForeground1Rest);
 }
 
 .breadcrumb-title {
   margin-bottom: 0px;
+
+  a {
+    display: inline-block;
+  }
 }
 
 .breadcrumb-divider {
@@ -420,13 +588,92 @@ img.reserved-indicator-icon {
   }
 }
 
-.usabilla-button {
-  top: auto !important;
-  margin-top: -65px;
-  bottom: 20%;
-  width: 40px;
-  height: 130px;
-  position: fixed;
-  z-index: 99999;
-  right: 0;
+.sortable {
+	cursor: pointer;
+}
+
+.form-group label.required::after {
+  color: var(--statusDangerStroke2Rest);
+  content: " *";
+}
+
+.sign-in-link a,
+.sign-in-link a:hover,
+.sign-in-link a:focus,
+.sign-in-link a:active {
+    color: var(--brandForegroundLinkRest);
+}
+
+.sign-in-link a:hover,
+.sign-in-link a:focus {
+    text-decoration: underline;
+}
+
+// Workaround. See https://github.com/NuGet/NuGetGallery/issues/8264
+@media (max-width: 767.9px) {
+    .hidden-xs {
+        display: none !important;
+    }
+}
+
+// Theme Definition
+html {
+  height: 100%;
+}
+
+body[id="/"] {
+  background: var(--body-background-color);
+}
+
+body,
+body[id="/"] {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  color: var(--neutralForeground1Rest);
+}
+/* For tooltip */
+.tooltip-target {
+  position: relative;
+  text-decoration: none;
+  color: var(--brandForegroundLinkRest);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--brandForegroundLinkHover);
+  }
+
+  &.tooltip-icon--black-icon {
+    color: var(--neutralForeground1Rest);
+  }
+}
+
+.tooltip-wrapper.popover {
+  min-width: 276px;
+  position: absolute;
+  transform: translateY(-50%);
+  top: calc(50%);
+}
+
+.tooltip-wrapper.popover.tooltip-with-icon {
+  top: calc(50%);
+}
+
+.tooltip-block {
+  position: relative;
+  color: var(--neutralForeground1Rest);
+
+  .popover-content {
+    display: block;
+  }
+
+  .popover {
+    left: -9999px;
+    display: inline-block;
+  }
+  .popover.show {
+    left: 0;
+  }
 }

@@ -1,12 +1,13 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
+using System.Collections.Generic;
 using Moq;
-using NuGet.Services.Entities;
 using Xunit;
+using NuGet.Services.Entities;
+using NuGetGallery.Services;
 
 namespace NuGetGallery
 {
@@ -23,7 +24,7 @@ namespace NuGetGallery
             "System.Spatial"
         };
 
-        private static IQueryable<PackageRegistration> PacakgeRegistrationsList = Enumerable.Range(0, _packageIds.Count()).Select(i =>
+        private static IQueryable<PackageRegistration> PackageRegistrationsList = Enumerable.Range(0, _packageIds.Count()).Select(i =>
                 new PackageRegistration()
                 {
                     Id = _packageIds[i],
@@ -47,7 +48,7 @@ namespace NuGetGallery
                 packageService = new Mock<IPackageService>();
                 packageService
                     .Setup(x => x.GetAllPackageRegistrations())
-                    .Returns(PacakgeRegistrationsList);
+                    .Returns(PackageRegistrationsList);
             }
 
             if (contentObjectService == null)
@@ -87,10 +88,15 @@ namespace NuGetGallery
 
             if (typosquattingCheckListCacheService == null)
             {
+                List<NormalizedPackageIdInfo> normalizedPackageIdInfos = PackageRegistrationsList
+                    .ToList()
+                    .Select(pr => new NormalizedPackageIdInfo(pr.Id, pr.Id))
+                    .ToList();
+
                 typosquattingCheckListCacheService = new Mock<ITyposquattingCheckListCacheService>();
                 typosquattingCheckListCacheService
                     .Setup(x => x.GetTyposquattingCheckList(It.IsAny<int>(), It.IsAny<TimeSpan>(), It.IsAny<IPackageService>()))
-                    .Returns(PacakgeRegistrationsList.Select(pr => pr.Id).ToList());
+                    .Returns(normalizedPackageIdInfos);
             }
 
             return new TyposquattingService(
@@ -99,7 +105,8 @@ namespace NuGetGallery
                 packageService.Object,
                 reservedNamespaceService.Object,
                 telemetryService.Object,
-                typosquattingCheckListCacheService.Object);
+                typosquattingCheckListCacheService.Object,
+                new ExactMatchTyposquattingServiceHelper());
         }
 
         [Fact]
@@ -109,13 +116,13 @@ namespace NuGetGallery
             var uploadedPackageId = "new_package_for_testing";
 
             var newService = CreateService();
-            
+
             // Act
             var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(0, typosquattingCheckCollisionIds.Count);
+            Assert.Empty(typosquattingCheckCollisionIds);
         }
 
         [Fact]
@@ -133,94 +140,7 @@ namespace NuGetGallery
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(0, typosquattingCheckCollisionIds.Count);
-        }
-
-        [Fact]
-        public void CheckIsTyposquattingByDifferentOwnersTest()
-        {
-            // Arrange            
-            var uploadedPackageId = "Mícrosoft.NetFramew0rk.v1";
-            var newService = CreateService();
-            
-            // Act
-            var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
-
-            // Assert
-            Assert.True(typosquattingCheckResult);
-            Assert.Equal(1, typosquattingCheckCollisionIds.Count);
-            Assert.Equal("microsoft_netframework_v1", typosquattingCheckCollisionIds[0]);
-        }
-
-        [Fact]
-        public void CheckIsTyposquattingMultiCollisionsWithoutSameUser()
-        {
-            // Arrange
-            var uploadedPackageId = "microsoft_netframework.v1";
-            var pacakgeRegistrationsList = PacakgeRegistrationsList.Concat(new PackageRegistration[]
-            {
-                new PackageRegistration {
-                    Id = "microsoft-netframework-v1",
-                    DownloadCount = new Random().Next(0, 10000),
-                    IsVerified = true,
-                    Owners = new List<User> { new User() { Username = string.Format("owner{0}", _packageIds.Count() + 2), Key = _packageIds.Count() + 2} }
-                }
-            });
-            var mockPackageService = new Mock<IPackageService>();
-            mockPackageService
-                .Setup(x => x.GetAllPackageRegistrations())
-                .Returns(pacakgeRegistrationsList);
-            var mockTyposquattingCheckListCacheService = new Mock<ITyposquattingCheckListCacheService>();
-            mockTyposquattingCheckListCacheService
-                .Setup(x => x.GetTyposquattingCheckList(It.IsAny<int>(), It.IsAny<TimeSpan>(), It.IsAny<IPackageService>()))
-                .Returns(pacakgeRegistrationsList.Select(pr => pr.Id).ToList());
-
-            var newService = CreateService(packageService: mockPackageService, typosquattingCheckListCacheService: mockTyposquattingCheckListCacheService);
-
-            // Act
-            var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
-
-            // Assert
-            Assert.True(typosquattingCheckResult);
-            Assert.Equal(2, typosquattingCheckCollisionIds.Count);
-        }
-
-        [Fact]
-        public void CheckNotTyposquattingMultiCollisionsWithSameUsers()
-        {
-            // Arrange            
-            var uploadedPackageId = "microsoft_netframework.v1";
-            _uploadedPackageOwner.Username = "owner1";
-            _uploadedPackageOwner.Key = 1;
-            var pacakgeRegistrationsList = PacakgeRegistrationsList.Concat(new PackageRegistration[]
-            {
-                new PackageRegistration()
-                {
-                    Id = "microsoft-netframework-v1",
-                    DownloadCount = new Random().Next(0, 10000),
-                    IsVerified = true,
-                    Owners = new List<User> { new User() { Username = string.Format("owner{0}", _packageIds.Count() + 2), Key = _packageIds.Count() + 2 } }
-                }
-            });
-
-            var mockPackageService = new Mock<IPackageService>();
-            mockPackageService
-                .Setup(x => x.GetAllPackageRegistrations())
-                .Returns(pacakgeRegistrationsList);
-            var mockTyposquattingCheckListCacheService = new Mock<ITyposquattingCheckListCacheService>();
-            mockTyposquattingCheckListCacheService
-                .Setup(x => x.GetTyposquattingCheckList(It.IsAny<int>(), It.IsAny<TimeSpan>(), It.IsAny<IPackageService>()))
-                .Returns(pacakgeRegistrationsList.Select(pr => pr.Id).ToList());
-
-            var newService = CreateService(packageService: mockPackageService, typosquattingCheckListCacheService: mockTyposquattingCheckListCacheService);
-
-            // Act
-            var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
-
-            // Assert
-            Assert.False(typosquattingCheckResult);
-            Assert.Equal(1, typosquattingCheckCollisionIds.Count);
-            Assert.Equal("microsoft-netframework-v1", typosquattingCheckCollisionIds[0]);
+            Assert.Empty(typosquattingCheckCollisionIds);
         }
 
         [Fact]
@@ -232,7 +152,7 @@ namespace NuGetGallery
             var mockReservedNamespaceService = new Mock<IReservedNamespaceService>();
             mockReservedNamespaceService
                 .Setup(x => x.GetReservedNamespacesForId(It.IsAny<string>()))
-                .Returns(new List<ReservedNamespace> { new ReservedNamespace()});
+                .Returns(new List<ReservedNamespace> { new ReservedNamespace() });
 
             var newService = CreateService(reservedNamespaceService: mockReservedNamespaceService);
 
@@ -241,7 +161,7 @@ namespace NuGetGallery
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(0, typosquattingCheckCollisionIds.Count);
+            Assert.Empty(typosquattingCheckCollisionIds);
         }
 
         [Fact]
@@ -290,7 +210,7 @@ namespace NuGetGallery
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(0, typosquattingCheckCollisionIds.Count);
+            Assert.Empty(typosquattingCheckCollisionIds);
         }
 
         [Fact]
@@ -305,16 +225,16 @@ namespace NuGetGallery
             var mockTyposquattingCheckListCacheService = new Mock<ITyposquattingCheckListCacheService>();
             mockTyposquattingCheckListCacheService
                 .Setup(x => x.GetTyposquattingCheckList(It.IsAny<int>(), It.IsAny<TimeSpan>(), It.IsAny<IPackageService>()))
-                .Returns(new List<string>());
+                .Returns(new List<NormalizedPackageIdInfo>());
 
             var newService = CreateService(packageService: mockPackageService, typosquattingCheckListCacheService: mockTyposquattingCheckListCacheService);
-            
+
             // Act
             var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(0, typosquattingCheckCollisionIds.Count);
+            Assert.Empty(typosquattingCheckCollisionIds);
         }
 
         [Theory]
@@ -340,7 +260,7 @@ namespace NuGetGallery
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(0, typosquattingCheckCollisionIds.Count);
+            Assert.Empty(typosquattingCheckCollisionIds);
 
             mockFeatureFlagService
                 .Verify(f => f.IsTyposquattingEnabled(), Times.Once);
@@ -360,13 +280,13 @@ namespace NuGetGallery
                 .Returns(20000);
 
             var newService = CreateService(contentObjectService: mockContentObjectService);
-            
+
             // Act
             var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(0, typosquattingCheckCollisionIds.Count);
+            Assert.Empty(typosquattingCheckCollisionIds);
         }
 
         [Fact]
@@ -384,19 +304,97 @@ namespace NuGetGallery
                 .Returns(false);
 
             var newService = CreateService(featureFlagService: featureFlagService);
-            
+
             // Act
+
             var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
 
             // Assert
             Assert.False(typosquattingCheckResult);
-            Assert.Equal(1, typosquattingCheckCollisionIds.Count);
+            Assert.Single(typosquattingCheckCollisionIds);
             Assert.Equal("microsoft_netframework_v1", typosquattingCheckCollisionIds[0]);
 
             featureFlagService
                 .Verify(f => f.IsTyposquattingEnabled(), Times.Once);
             featureFlagService
                 .Verify(f => f.IsTyposquattingEnabled(_uploadedPackageOwner), Times.Once);
+        }
+
+        [Fact]
+        public void CheckIsTyposquattingBlockDifferentOwnersUploadBlocked()
+        {
+            // Arrange
+            var uploadedPackageId = "Microsoft_NetFramework_v1";
+            string conflictingPackageId = "microsoft_netframework_v1";
+            User conflictingPackageOwner = PackageRegistrationsList
+                .Single(pr => pr.Id == conflictingPackageId)
+                .Owners
+                .First();
+
+            // Make sure they have different owners.
+            Assert.NotEqual(_uploadedPackageOwner.Key, conflictingPackageOwner.Key);
+
+            var featureFlagService = new Mock<IFeatureFlagService>();
+            featureFlagService
+                .Setup(f => f.IsTyposquattingEnabled())
+                .Returns(true);
+            featureFlagService
+                .Setup(f => f.IsTyposquattingEnabled(_uploadedPackageOwner))
+                .Returns(true);
+
+            var newService = CreateService(featureFlagService: featureFlagService);
+
+            // Act
+
+            var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, _uploadedPackageOwner, out List<string> typosquattingCheckCollisionIds);
+
+            // Assert
+            Assert.True(typosquattingCheckResult);
+            Assert.Single(typosquattingCheckCollisionIds);
+            Assert.Equal(conflictingPackageId, typosquattingCheckCollisionIds[0]);
+
+            featureFlagService
+                .Verify(f => f.IsTyposquattingEnabled(), Times.Once);
+            featureFlagService
+                .Verify(f => f.IsTyposquattingEnabled(_uploadedPackageOwner), Times.Once);
+        }
+
+        [Fact]
+        public void CheckIsTyposquattingBlockSameOwnerUploadNotBlocked()
+        {
+            // Arrange
+            var uploadedPackageId = "Microsoft_NetFramework_v1";
+            string conflictingPackageId = "microsoft_netframework_v1";
+
+            var featureFlagService = new Mock<IFeatureFlagService>();
+
+            // Use same owner for both packages.
+            User samePackageOwner =  PackageRegistrationsList
+                .Single(pr => pr.Id == conflictingPackageId)
+                .Owners
+                .First();
+
+            featureFlagService
+                .Setup(f => f.IsTyposquattingEnabled())
+                .Returns(true);
+            featureFlagService
+                .Setup(f => f.IsTyposquattingEnabled(samePackageOwner))
+                .Returns(true);
+
+            var newService = CreateService(featureFlagService: featureFlagService);
+
+            // Act
+
+            var typosquattingCheckResult = newService.IsUploadedPackageIdTyposquatting(uploadedPackageId, samePackageOwner, out List<string> typosquattingCheckCollisionIds);
+
+            // Assert
+            Assert.False(typosquattingCheckResult);
+            Assert.Empty(typosquattingCheckCollisionIds);
+
+            featureFlagService
+                .Verify(f => f.IsTyposquattingEnabled(), Times.Once);
+            featureFlagService
+                .Verify(f => f.IsTyposquattingEnabled(samePackageOwner), Times.Once);
         }
 
         [Fact]
@@ -429,64 +427,6 @@ namespace NuGetGallery
                     It.IsAny<int>(),
                     It.IsAny<TimeSpan>()),
                 Times.Once);
-
-            mockTelemetryService.Verify(
-                x => x.TrackMetricForTyposquattingOwnersCheckTime(uploadedPackageId, It.IsAny<TimeSpan>()),
-                Times.Once);
-        }
-
-        [Theory]
-        [InlineData("Microsoft_NetFramework_v1", "Microsoft.NetFramework.v1", 0)]
-        [InlineData("Microsoft_NetFramework_v1", "microsoft-netframework-v1", 0)]
-        [InlineData("Microsoft_NetFramework_v1", "MicrosoftNetFrameworkV1", 0)]
-        [InlineData("Microsoft_NetFramework_v1", "Mícr0s0ft_NetFrάmѐw0rk_v1", 0)]
-        [InlineData("Dotnet.Script.Core.RoslynDependencies", "dotnet-script-core-rõslyndependencies", 1)]
-        [InlineData("Dotnet.Script.Core.RoslynDependencies", "DotnetScriptCoreRoslyndependncies", 1)]
-        [InlineData("MichaelBrandonMorris.Extensions.CollectionExtensions", "Michaelbrandonmorris.Extension.CollectionExtension", 2)]
-        [InlineData("MichaelBrandonMorris.Extensions.CollectionExtensions", "MichaelBrandonMoris_Extensions_CollectionExtension", 2)]
-        public void CheckTyposquattingDistance(string str1, string str2, int threshold)
-        {
-            // Arrange 
-            str1 = TyposquattingStringNormalization.NormalizeString(str1);
-            str2 = TyposquattingStringNormalization.NormalizeString(str2);
-
-            // Act
-            var checkResult = TyposquattingDistanceCalculation.IsDistanceLessThanThreshold(str1, str2, threshold);
-            
-            // Assert
-            Assert.True(checkResult);
-        }
-
-        [Theory]
-        [InlineData("Lappa.ORM", "JCTools.I18N", 0)]
-        [InlineData("Cake.Intellisense.Core", "Cake.IntellisenseGenerator", 0)]
-        [InlineData("Hangfire.Net40", "Hangfire.SqlServer.Net40", 0)]
-        [InlineData("LogoFX.Client.Tests.Integration.SpecFlow.Core", "LogoFX.Client.Testing.EndToEnd.SpecFlow", 1)]
-        [InlineData("cordova-plugin-ms-adal.TypeScript.DefinitelyTyped", "eonasdan-bootstrap-datetimepicker.TypeScript.DefinitelyTyped", 2)]
-        public void CheckNotTyposquattingDistance(string str1, string str2, int threshold)
-        {
-            // Arrange
-            str1 = TyposquattingStringNormalization.NormalizeString(str1);
-            str2 = TyposquattingStringNormalization.NormalizeString(str2);
-
-            // Act
-            var checkResult = TyposquattingDistanceCalculation.IsDistanceLessThanThreshold(str1, str2, threshold);
-            
-            // Assert
-            Assert.False(checkResult);
-        }
-        
-        [Theory]
-        [InlineData("Microsoft_NetFramework_v1", "microsoft_netframework_v1")]
-        [InlineData("Microsoft.netframework-v1", "microsoft_netframework_v1")]
-        [InlineData("mícr0s0ft.nёtFrǎmȇwὀrk.v1", "microsoft_netframework_v1")]
-        public void CheckNormalization(string str1, string str2)
-        {
-            // Arrange and Act
-            str1 = TyposquattingStringNormalization.NormalizeString(str1);
-
-            // Assert
-            Assert.Equal(str1, str2);
         }
     }
 }

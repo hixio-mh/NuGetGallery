@@ -80,6 +80,220 @@ namespace NuGetGallery
             }
         }
 
+        public class TheGetSearchFilterFunction
+        {
+            private static readonly Dictionary<SortOrder, string> SortNames = new Dictionary<SortOrder, string>
+            {
+                {SortOrder.LastEdited, GalleryConstants.SearchSortNames.LastEdited},
+                {SortOrder.Relevance, GalleryConstants.SearchSortNames.Relevance},
+                {SortOrder.Published, GalleryConstants.SearchSortNames.Published},
+                {SortOrder.TitleAscending, GalleryConstants.SearchSortNames.TitleAsc},
+                {SortOrder.TitleDescending, GalleryConstants.SearchSortNames.TitleDesc},
+                {SortOrder.CreatedAscending, GalleryConstants.SearchSortNames.CreatedAsc},
+                {SortOrder.CreatedDescending, GalleryConstants.SearchSortNames.CreatedDesc},
+                {SortOrder.TotalDownloadsAscending, GalleryConstants.SearchSortNames.TotalDownloadsAsc},
+                {SortOrder.TotalDownloadsDescending, GalleryConstants.SearchSortNames.TotalDownloadsDesc},
+            };
+
+            public static IEnumerable<object[]> AllSortOrders => Enum
+               .GetValues(typeof(SortOrder))
+               .Cast<SortOrder>()
+               .Select(so => new object[] { so });
+
+            [Fact]
+            public void ReturnsDefaultSearchFilter()
+            {
+                const string query = "someQuery";
+                const int page = 1;
+                const bool includePrerelease = true;
+                const string frameworks = "";
+                const string tfms = "";
+                const bool includeComputedFrameworks = true;
+                const string frameworkFilterMode = "";
+                const string packageType = "";
+                const string sortOrder = GalleryConstants.SearchSortNames.Relevance;
+                const string context = "someContext";
+                const string semVerLevel = "someSemVer";
+                const bool includeTestData = true;
+
+                var searchFilter = SearchAdaptor.GetSearchFilter(
+                    query,
+                    page,
+                    includePrerelease,
+                    frameworks,
+                    tfms,
+                    includeComputedFrameworks,
+                    frameworkFilterMode,
+                    packageType,
+                    sortOrder,
+                    context,
+                    semVerLevel,
+                    includeTestData);
+
+                Assert.Equal(query, searchFilter.SearchTerm);
+                Assert.Equal((page - 1) * GalleryConstants.DefaultPackageListPageSize, searchFilter.Skip);
+                Assert.Equal(GalleryConstants.DefaultPackageListPageSize, searchFilter.Take);
+                Assert.Equal(includePrerelease, searchFilter.IncludePrerelease);
+                Assert.Equal(context, searchFilter.Context);
+                Assert.Equal(semVerLevel, searchFilter.SemVerLevel);
+                Assert.Equal(string.Empty, searchFilter.Frameworks);
+                Assert.Equal(string.Empty, searchFilter.Tfms);
+                Assert.True(searchFilter.IncludeComputedFrameworks);
+                Assert.Equal(string.Empty, searchFilter.FrameworkFilterMode);
+                Assert.Equal(string.Empty, searchFilter.PackageType);
+                Assert.Equal(SortOrder.Relevance, searchFilter.SortOrder);
+                Assert.Equal(includeTestData, searchFilter.IncludeTestData);
+            }
+
+            [Fact]
+            public void ReturnsDefaultSearchFilterOnNull()
+            {
+                var searchFilter = SearchAdaptor.GetSearchFilter(
+                    q: null,
+                    page: -1,
+                    includePrerelease: true,
+                    frameworks: null,
+                    tfms: null,
+                    includeComputedFrameworks: true,
+                    frameworkFilterMode: null,
+                    packageType: null,
+                    sortOrder: null,
+                    context: null,
+                    semVerLevel: null,
+                    includeTestData: true);
+
+                Assert.Null(searchFilter.SearchTerm);
+                Assert.Equal(0, searchFilter.Skip);
+                Assert.Equal(GalleryConstants.DefaultPackageListPageSize, searchFilter.Take);
+                Assert.True(searchFilter.IncludePrerelease);
+                Assert.Null(searchFilter.Context);
+                Assert.Null(searchFilter.SemVerLevel);
+                Assert.Equal(string.Empty, searchFilter.Frameworks);
+                Assert.Equal(string.Empty, searchFilter.Tfms);
+                Assert.True(searchFilter.IncludeComputedFrameworks);
+                Assert.Equal("all", searchFilter.FrameworkFilterMode);
+                Assert.Equal(string.Empty, searchFilter.PackageType);
+                Assert.Equal(SortOrder.Relevance, searchFilter.SortOrder);
+                Assert.True(searchFilter.IncludeTestData);
+            }
+
+            [Theory]
+            [MemberData(nameof(AllSortOrders))]
+            public void MapsAllSortOrders(SortOrder sortOrder)
+            {
+                var searchFilter = SearchAdaptor.GetSearchFilter(
+                   q: string.Empty,
+                   page: 1,
+                   includePrerelease: true,
+                   frameworks: string.Empty,
+                   tfms: string.Empty,
+                   includeComputedFrameworks: true,
+                   frameworkFilterMode: null,
+                   packageType: "Dependency",
+                   sortOrder: SortNames[sortOrder],
+                   context: string.Empty,
+                   semVerLevel: "SomeSemVer",
+                   includeTestData: true);
+
+                Assert.Equal(string.Empty, searchFilter.SearchTerm);
+                Assert.Equal(0, searchFilter.Skip);
+                Assert.Equal(GalleryConstants.DefaultPackageListPageSize, searchFilter.Take);
+                Assert.True(searchFilter.IncludePrerelease);
+                Assert.Equal(string.Empty, searchFilter.Context);
+                Assert.Equal("SomeSemVer", searchFilter.SemVerLevel);
+                Assert.Equal(string.Empty, searchFilter.Frameworks);
+                Assert.Equal(string.Empty, searchFilter.Tfms);
+                Assert.True(searchFilter.IncludeComputedFrameworks);
+                Assert.Equal("all", searchFilter.FrameworkFilterMode);
+                Assert.Equal("Dependency", searchFilter.PackageType);
+                Assert.Equal(sortOrder, searchFilter.SortOrder);
+                Assert.True(searchFilter.IncludeTestData);
+            }
+
+            [Theory]
+            [MemberData(nameof(AllSortOrders))]
+            public void IgnoresCaseForSortOrder(SortOrder sortOrder)
+            {
+                var searchFilter = SearchAdaptor.GetSearchFilter(
+                       q: string.Empty,
+                       page: 1,
+                       includePrerelease: true,
+                       frameworks: string.Empty,
+                       tfms: string.Empty,
+                       includeComputedFrameworks: true,
+                       frameworkFilterMode: null,
+                       packageType: "Dependency",
+                       sortOrder: SortNames[sortOrder].ToUpper(),
+                       context: string.Empty,
+                       semVerLevel: "SomeSemVer",
+                       includeTestData: true);
+
+                Assert.Equal(string.Empty, searchFilter.SearchTerm);
+                Assert.Equal(0, searchFilter.Skip);
+                Assert.Equal(GalleryConstants.DefaultPackageListPageSize, searchFilter.Take);
+                Assert.True(searchFilter.IncludePrerelease);
+                Assert.Equal(string.Empty, searchFilter.Context);
+                Assert.Equal("SomeSemVer", searchFilter.SemVerLevel);
+                Assert.Equal(string.Empty, searchFilter.Frameworks);
+                Assert.Equal(string.Empty, searchFilter.Tfms);
+                Assert.True(searchFilter.IncludeComputedFrameworks);
+                Assert.Equal("all", searchFilter.FrameworkFilterMode);
+                Assert.Equal("Dependency", searchFilter.PackageType);
+                Assert.Equal(sortOrder, searchFilter.SortOrder);
+                Assert.True(searchFilter.IncludeTestData);
+            }
+
+            [Theory]
+            [MemberData(nameof(FrameworksAndTfmsFilterData))]
+            public void ParsesFrameworkAndTfmFilters(string frameworks, string tfms, bool includeComputedFrameworks, string frameworkFilterMode)
+            {
+                const string query = "someQuery";
+                const int page = 1;
+                const bool includePrerelease = true;
+                const string packageType = "";
+                const string sortOrder = GalleryConstants.SearchSortNames.Relevance;
+                const string context = "someContext";
+                const string semVerLevel = "someSemVer";
+                const bool includeTestData = true;
+
+                var searchFilter = SearchAdaptor.GetSearchFilter(
+                    query,
+                    page,
+                    includePrerelease,
+                    frameworks,
+                    tfms,
+                    includeComputedFrameworks,
+                    frameworkFilterMode,
+                    packageType,
+                    sortOrder,
+                    context,
+                    semVerLevel,
+                    includeTestData);
+
+                Assert.Equal(query, searchFilter.SearchTerm);
+                Assert.Equal((page - 1) * GalleryConstants.DefaultPackageListPageSize, searchFilter.Skip);
+                Assert.Equal(GalleryConstants.DefaultPackageListPageSize, searchFilter.Take);
+                Assert.Equal(includePrerelease, searchFilter.IncludePrerelease);
+                Assert.Equal(context, searchFilter.Context);
+                Assert.Equal(semVerLevel, searchFilter.SemVerLevel);
+                Assert.Equal(frameworks, searchFilter.Frameworks);
+                Assert.Equal(tfms, searchFilter.Tfms);
+                Assert.Equal(includeComputedFrameworks, searchFilter.IncludeComputedFrameworks);
+                Assert.Equal(frameworkFilterMode, searchFilter.FrameworkFilterMode);
+                Assert.Equal(string.Empty, searchFilter.PackageType);
+                Assert.Equal(SortOrder.Relevance, searchFilter.SortOrder);
+                Assert.Equal(includeTestData, searchFilter.IncludeTestData);
+            }
+
+            public static IEnumerable<object[]> FrameworksAndTfmsFilterData => new[]
+            {
+                new object[] { "", "", true, "all" },
+                new object[] { "netstandard", "net472", false, "all" },
+                new object[] { ",net,netframework", "", true, "any" },
+                new object[] { ",,", "net5.0,netstandard2.1,", false, "any" }
+            };
+        }
+
         public class TheFindByIdAndVersionCoreMethod : Facts
         {
             public TheFindByIdAndVersionCoreMethod()
@@ -294,7 +508,7 @@ namespace NuGetGallery
             public void GeneratesNextLinkForComplexUrl()
             {
                 // Arrange
-                var requestUri = new Uri("https://localhost:8081/api/v2/Search()?searchTerm='foo'&$orderby=Id&$skip=100&$top=1000");
+                var requestUri = new Uri("https://localhost:8081/api/v2/Search()?searchTerm=%27foo%27&$orderby=Id&$skip=100&$top=1000");
                 var resultCount = 2000; // our result set contains 2000 elements
 
                 // Act
@@ -303,14 +517,14 @@ namespace NuGetGallery
                     GetODataQuerySettingsForTest());
 
                 // Assert
-                Assert.Equal(new Uri("https://localhost:8081/api/v2/Search()?searchTerm='foo'&$orderby=Id&$skip=200&$top=1000"), nextLink);
+                Assert.Equal("https://localhost:8081/api/v2/Search()?searchTerm=%27foo%27&$orderby=Id&$skip=200&$top=1000", nextLink.AbsoluteUri);
             }
 
             [Fact]
             public void GeneratesNextLinkForComplexUrlWithSemVerLevel2()
             {
                 // Arrange
-                var requestUri = new Uri("https://localhost:8081/api/v2/Search()?searchTerm='foo'&$orderby=Id&$skip=100&$top=1000&semVerLevel=2.0.0");
+                var requestUri = new Uri("https://localhost:8081/api/v2/Search()?searchTerm=%27foo%27&$orderby=Id&$skip=100&$top=1000&semVerLevel=2.0.0");
                 var resultCount = 2000; // our result set contains 2000 elements
 
                 // Act
@@ -320,7 +534,7 @@ namespace NuGetGallery
                     SemVerLevelKey.SemVer2);
 
                 // Assert
-                Assert.Equal(new Uri("https://localhost:8081/api/v2/Search()?searchTerm='foo'&$orderby=Id&$skip=200&$top=1000&semVerLevel=2.0.0"), nextLink);
+                Assert.Equal("https://localhost:8081/api/v2/Search()?searchTerm=%27foo%27&$orderby=Id&$skip=200&$top=1000&semVerLevel=2.0.0", nextLink.AbsoluteUri);
             }
         }
     }

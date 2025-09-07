@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -12,15 +12,18 @@ using System.Web;
 using System.Web.Mvc;
 using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
+using NuGet.Versioning;
 using NuGetGallery.Areas.Admin;
 using NuGetGallery.Areas.Admin.ViewModels;
 using NuGetGallery.Authentication;
 using NuGetGallery.Configuration;
 using NuGetGallery.Filters;
+using NuGetGallery.Frameworks;
 using NuGetGallery.Helpers;
 using NuGetGallery.Infrastructure.Authentication;
 using NuGetGallery.Infrastructure.Mail.Messages;
 using NuGetGallery.Security;
+using NuGetGallery.Services.Authentication;
 
 namespace NuGetGallery
 {
@@ -34,6 +37,8 @@ namespace NuGetGallery
         private readonly ListPackageItemViewModelFactory _listPackageItemViewModelFactory;
         private readonly ISupportRequestService _supportRequestService;
         private readonly IFeatureFlagService _featureFlagService;
+        private readonly IPackageVulnerabilitiesService _packageVulnerabilitiesService;
+        private readonly IFederatedCredentialService _federatedCredentialService;
 
         public UsersController(
             IUserService userService,
@@ -50,9 +55,13 @@ namespace NuGetGallery
             ICertificateService certificateService,
             IContentObjectService contentObjectService,
             IFeatureFlagService featureFlagService,
+            IPackageVulnerabilitiesService packageVulnerabilitiesService,
             IMessageServiceConfiguration messageServiceConfiguration,
             IIconUrlProvider iconUrlProvider,
-            IGravatarProxyService gravatarProxy)
+            IGravatarProxyService gravatarProxy,
+            IPackageFrameworkCompatibilityFactory frameworkCompatibilityFactory,
+            IFederatedCredentialService federatedCredentialService,
+            IFederatedCredentialRepository federatedCredentialRepository)
             : base(
                   authService,
                   packageService,
@@ -65,16 +74,21 @@ namespace NuGetGallery
                   messageServiceConfiguration,
                   deleteAccountService,
                   iconUrlProvider,
-                  gravatarProxy)
+                  gravatarProxy,
+                  featureFlagService,
+                  frameworkCompatibilityFactory)
         {
             _packageOwnerRequestService = packageOwnerRequestService ?? throw new ArgumentNullException(nameof(packageOwnerRequestService));
             _config = config ?? throw new ArgumentNullException(nameof(config));
             _credentialBuilder = credentialBuilder ?? throw new ArgumentNullException(nameof(credentialBuilder));
             _supportRequestService = supportRequestService ?? throw new ArgumentNullException(nameof(supportRequestService));
             _featureFlagService = featureFlagService ?? throw new ArgumentNullException(nameof(featureFlagService));
+            _packageVulnerabilitiesService = packageVulnerabilitiesService ?? throw new ArgumentNullException(nameof(packageVulnerabilitiesService));
+            _federatedCredentialService = federatedCredentialService ?? throw new ArgumentNullException(nameof(federatedCredentialService));
 
-            _listPackageItemRequiredSignerViewModelFactory = new ListPackageItemRequiredSignerViewModelFactory(securityPolicyService, iconUrlProvider);
-            _listPackageItemViewModelFactory = new ListPackageItemViewModelFactory(iconUrlProvider);
+            _listPackageItemRequiredSignerViewModelFactory = new ListPackageItemRequiredSignerViewModelFactory(
+                securityPolicyService, iconUrlProvider, packageVulnerabilitiesService, frameworkCompatibilityFactory, featureFlagService);
+            _listPackageItemViewModelFactory = new ListPackageItemViewModelFactory(iconUrlProvider, frameworkCompatibilityFactory, _featureFlagService);
         }
 
         public override string AccountAction => nameof(Account);
@@ -196,9 +210,9 @@ namespace NuGetGallery
                 _config,
                 accountToTransform,
                 adminUser,
-                profileUrl: Url.User(accountToTransform, relativeUrl: false),
-                confirmationUrl: Url.ConfirmTransformAccount(accountToTransform, relativeUrl: false),
-                rejectionUrl: Url.RejectTransformAccount(accountToTransform, relativeUrl: false));
+                profileUrl: Url.User(accountToTransform, relativeUrl: false, supportEmail: true),
+                confirmationUrl: Url.ConfirmTransformAccount(accountToTransform, relativeUrl: false, supportEmail: true),
+                rejectionUrl: Url.RejectTransformAccount(accountToTransform, relativeUrl: false, supportEmail: true));
             await MessageService.SendMessageAsync(organizationTransformRequestMessage);
 
             var organizationTransformInitiatedMessage = new OrganizationTransformInitiatedMessage(
@@ -253,7 +267,7 @@ namespace NuGetGallery
             {
                 return TransformToOrganizationFailed(errorReason);
             }
-            
+
             if (accountToTransform.OrganizationMigrationRequest != null
                 && accountToTransform.OrganizationMigrationRequest.ConfirmationToken == token
                 && !accountToTransform.OrganizationMigrationRequest.AdminUser.MatchesUser(adminUser))
@@ -471,11 +485,16 @@ namespace NuGetGallery
             owners.AddRange(currentUser.Organizations
                 .Select(o => CreateApiKeyOwnerViewModel(currentUser, o.Organization)));
 
+            var anyWithDeprecationApi =
+                _featureFlagService.IsManageDeprecationApiEnabled(currentUser)
+                || currentUser.Organizations.Any(m => _featureFlagService.IsManageDeprecationApiEnabled(m.Organization));
+
             var model = new ApiKeyListViewModel
             {
                 ApiKeys = apiKeys,
                 ExpirationInDaysForApiKeyV1 = _config.ExpirationInDaysForApiKeyV1,
                 PackageOwners = owners.Where(o => o.CanPushNew || o.CanPushExisting || o.CanUnlist).ToList(),
+                IsDeprecationApiEnabled = anyWithDeprecationApi,
             };
 
             return View("ApiKeys", model);
@@ -521,16 +540,12 @@ namespace NuGetGallery
             var wasAADLoginOrMultiFactorAuthenticated = User.WasMultiFactorAuthenticated() || User.WasAzureActiveDirectoryAccountUsedForSignin();
 
             var packages = PackageService.FindPackagesByAnyMatchingOwner(currentUser, includeUnlisted: true);
-            var listedPackages = packages
-                .Where(p => p.Listed && p.PackageStatusKey == PackageStatus.Available)
-                .Select(p => _listPackageItemRequiredSignerViewModelFactory.Create(p, currentUser, wasAADLoginOrMultiFactorAuthenticated))
-                .OrderBy(p => p.Id)
-                .ToList();
-            var unlistedPackages = packages
-                .Where(p => !p.Listed || p.PackageStatusKey != PackageStatus.Available)
-                .Select(p => _listPackageItemRequiredSignerViewModelFactory.Create(p, currentUser, wasAADLoginOrMultiFactorAuthenticated))
-                .OrderBy(p => p.Id)
-                .ToList();
+
+            var listedPackages = GetPackages(packages, currentUser, wasAADLoginOrMultiFactorAuthenticated,
+                p => p.Listed && p.PackageStatusKey == PackageStatus.Available);
+
+            var unlistedPackages = GetPackages(packages, currentUser, wasAADLoginOrMultiFactorAuthenticated,
+                p => !p.Listed || p.PackageStatusKey != PackageStatus.Available);
 
             // find all received ownership requests
             var userReceived = _packageOwnerRequestService.GetPackageOwnershipRequests(newOwner: currentUser);
@@ -562,9 +577,41 @@ namespace NuGetGallery
                 OwnerRequests = ownerRequests,
                 ReservedNamespaces = reservedPrefixes,
                 WasMultiFactorAuthenticated = User.WasMultiFactorAuthenticated(),
-                IsCertificatesUIEnabled = ContentObjectService.CertificatesConfiguration?.IsUIEnabledForUser(currentUser) ?? false
+                IsCertificatesUIEnabled = ContentObjectService.CertificatesConfiguration?.IsUIEnabledForUser(currentUser) ?? false,
+                IsManagePackagesVulnerabilitiesEnabled = _featureFlagService.IsManagePackagesVulnerabilitiesEnabled()
             };
+
             return View(model);
+        }
+
+        /// <summary>
+        /// Returns all packages based on the predicate, with the VersionSortOrder populated
+        /// </summary>
+        /// <param name="packages"></param>
+        /// <param name="currentUser"></param>
+        /// <param name="wasAADLoginOrMultiFactorAuthenticated"></param>
+        /// <param name="predicate"></param>
+        /// <returns></returns>
+        private List<ListPackageItemRequiredSignerViewModel> GetPackages(
+            IEnumerable<Package> packages,
+            User currentUser,
+            bool wasAADLoginOrMultiFactorAuthenticated,
+            Func<Package, bool> predicate)
+        {
+            var listedPackages = packages
+                .Where(p => predicate(p))
+                .Select(p => _listPackageItemRequiredSignerViewModelFactory.Create(p, currentUser, wasAADLoginOrMultiFactorAuthenticated))
+                .OrderBy(p => NuGetVersion.Parse(p.FullVersion))
+                .ToList();
+
+            for (int i = 0; i < listedPackages.Count; i++)
+            {
+                listedPackages[i].VersionSortOrder = i;
+            }
+
+            listedPackages.Sort((x, y) => string.Compare(x.Id, y.Id, StringComparison.OrdinalIgnoreCase));
+
+            return listedPackages;
         }
 
         [HttpGet]
@@ -585,13 +632,24 @@ namespace NuGetGallery
             // By having this value present in the dictionary BUT null, we don't put "returnUrl" on the Login link at all
             ViewData[GalleryConstants.ReturnUrlViewDataKey] = null;
 
-            return View();
+            var model = new ForgotPasswordViewModel();
+            model.IsPasswordLoginEnabled = _featureFlagService.IsNuGetAccountPasswordLoginEnabled();
+
+            return View(model);
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [ValidateRecaptchaResponse]
         public virtual async Task<ActionResult> ForgotPassword(ForgotPasswordViewModel model)
         {
+            if(!_featureFlagService.IsNuGetAccountPasswordLoginEnabled() && !ContentObjectService.LoginDiscontinuationConfiguration.IsEmailInExceptionsList(model.Email))
+            {
+                ModelState.AddModelError(string.Empty, Strings.ForgotPassword_Disabled_Error);
+
+                return View(model);
+            }
+
             // We don't want Login to have us as a return URL
             // By having this value present in the dictionary BUT null, we don't put "returnUrl" on the Login link at all
             ViewData[GalleryConstants.ReturnUrlViewDataKey] = null;
@@ -698,19 +756,54 @@ namespace NuGetGallery
                 return HttpNotFound();
             }
 
-            var packages = PackageService.FindPackagesByOwner(user, includeUnlisted: false)
-                .Where(p => p.PackageStatusKey == PackageStatus.Available)
-                .OrderByDescending(p => p.PackageRegistration.DownloadCount)
-                .Select(p =>
-                {
-                    var viewModel = _listPackageItemViewModelFactory.Create(p, currentUser);
-                    viewModel.DownloadCount = p.PackageRegistration.DownloadCount;
-                    return viewModel;
-                }).ToList();
+            var usesDatabasePaging = _featureFlagService.IsProfileLoadOptimizationEnabled();
 
-            var model = new UserProfileModel(user, currentUser, packages, page - 1, GalleryConstants.DefaultPackageListPageSize, Url);
+            var packages = new List<ListPackageItemViewModel>();
+
+            var totalDownloadCount = 0L;
+            var packageCount = 0;
+
+            if (!usesDatabasePaging)
+            {
+                packages = PackageService.FindPackagesByOwner(user, includeUnlisted: false)
+                    .Where(p => p.PackageStatusKey == PackageStatus.Available)
+                    .OrderByDescending(p => p.PackageRegistration.DownloadCount)
+                    .Select(p =>
+                    {
+                        var viewModel = _listPackageItemViewModelFactory.Create(p, currentUser, false);
+                        viewModel.DownloadCount = p.PackageRegistration.DownloadCount;
+                        return viewModel;
+                    }).ToList();
+            }
+            else
+            {
+                var packageResult = PackageService.FindPackagesByProfile(user, page, GalleryConstants.DefaultPackageListPageSize);
+
+                packages = packageResult.Packages
+                    .Select(p =>
+                    {
+                        var viewModel = _listPackageItemViewModelFactory.Create(p, currentUser, false);
+                        viewModel.DownloadCount = p.PackageRegistration.DownloadCount;
+                        return viewModel;
+                    }).ToList();
+
+                totalDownloadCount = packageResult.TotalDownloadCount;
+                packageCount = packageResult.PackageCount;
+            }
+
+            var model = new UserProfileModel(
+                user,
+                currentUser,
+                packages,
+                page - 1,
+                GalleryConstants.DefaultPackageListPageSize,
+                Url,
+                usesDatabasePaging,
+                totalDownloadCount,
+                packageCount);
 
             return View(model);
+
         }
 
         [HttpPost]
@@ -770,6 +863,13 @@ namespace NuGetGallery
         public virtual async Task<ActionResult> ChangeMultiFactorAuthentication(bool enableMultiFactor)
         {
             var user = GetCurrentUser();
+
+            if (user.IsLocked && enableMultiFactor == false)
+            {
+                TempData["ErrorMessage"] = ServicesStrings.UserAccountIsLocked;
+                return RedirectToAction(AccountAction);
+            }
+
             var referrer = OwinContext.Request?.Headers?.Get("Referer") ?? "Unknown";
 
             await UserService.ChangeMultiFactorAuthentication(user, enableMultiFactor, referrer);
@@ -848,6 +948,36 @@ namespace NuGetGallery
         [HttpPost]
         [UIAuthorize]
         [ValidateAntiForgeryToken]
+        public virtual async Task<JsonResult> RevokeApiKeyCredential(string credentialType, int? credentialKey)
+        {
+            var user = GetCurrentUser();
+
+            var cred = user.Credentials.SingleOrDefault(
+                c => string.Equals(c.Type, credentialType, StringComparison.OrdinalIgnoreCase)
+                    && CredentialKeyMatches(credentialKey, c));
+
+            if (cred == null)
+            {
+                Response.StatusCode = (int)HttpStatusCode.NotFound;
+                return Json(Strings.CredentialNotFound);
+            }
+
+            await AuthenticationService.RevokeApiKeyCredential(cred, CredentialRevocationSource.User);
+
+            var credViewModel = AuthenticationService.DescribeCredential(cred);
+
+            var emailMessage = new ApiKeyRevokedMessage(
+                _config,
+                user,
+                credViewModel.GetCredentialTypeInfo());
+            await MessageService.SendMessageAsync(emailMessage);
+
+            return Json(new ApiKeyViewModel(credViewModel));
+        }
+
+        [HttpPost]
+        [UIAuthorize]
+        [ValidateAntiForgeryToken]
         public virtual ActionResult LinkOrChangeExternalCredential()
         {
             return Redirect(Url.AuthenticateExternal(Url.AccountSettings()));
@@ -859,6 +989,13 @@ namespace NuGetGallery
         public virtual async Task<JsonResult> RegenerateCredential(string credentialType, int? credentialKey)
         {
             var user = GetCurrentUser();
+
+            if (user.IsLocked)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(ServicesStrings.UserAccountIsLocked);
+            }
+
             var cred = user.Credentials.SingleOrDefault(
                 c => string.Equals(c.Type, credentialType, StringComparison.OrdinalIgnoreCase)
                     && CredentialKeyMatches(credentialKey, c));
@@ -897,6 +1034,215 @@ namespace NuGetGallery
             return View();
         }
 
+        [HttpGet]
+        [UIAuthorize]
+        public virtual ActionResult TrustedPublishing()
+        {
+            User currentUser = GetCurrentUser();
+            if (!_featureFlagService.IsTrustedPublishingEnabled(currentUser))
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.NotFound);
+            }
+
+            var userPolicies = _federatedCredentialService.GetPoliciesCreatedByUser(currentUser.Key);
+
+            // Show newest policies on the top.
+            var policies = userPolicies
+                .OrderByDescending(p => p.Created)
+                .Select(CreatePublisherViewModel)
+                .Where(m => m != null)
+                .ToArray();
+
+            // Get package owners (user's self or organizations). The final list can be empty,
+            // e.g. if the user is not a member of any organization and has no packages.
+            var ownersCandidates = new List<User>() { currentUser };
+            ownersCandidates.AddRange(currentUser.Organizations.Select(o => o.Organization));
+            var owners = ownersCandidates
+                .Where(o => _federatedCredentialService.IsValidPolicyOwner(currentUser, o))
+                .ToArray();
+
+            var model = new TrustedPublisherPolicyListViewModel
+            {
+                Username = currentUser.Username,
+                Policies = policies,
+                PackageOwners = owners.Select(o => o.Username).ToArray(),
+            };
+
+            return View("TrustedPublishing", model);
+        }
+
+        private TrustedPublisherPolicyViewModel CreatePublisherViewModel(FederatedCredentialPolicy policy)
+        {
+            // Currently only GitHub Actions policies are supported by our Trusted Publishing UX.
+            if (policy.Type != FederatedCredentialType.GitHubActions)
+            {
+                return null;
+            }
+
+            if (GitHubPolicyDetailsViewModel.FromDatabaseJson(policy.Criteria)
+                is not GitHubPolicyDetailsViewModel policyDetails)
+            {
+                return null;
+            }
+
+            bool isOwnerValid = _federatedCredentialService.IsValidPolicyOwner(policy.CreatedBy, policy.PackageOwner);
+            return new TrustedPublisherPolicyViewModel
+            {
+                Key = policy.Key,
+                PolicyName = !string.IsNullOrEmpty(policy.PolicyName) ? policy.PolicyName : $"Policy {policy.Key}",
+                Owner = policy.PackageOwner.Username,
+                IsOwnerValid = isOwnerValid,
+                PolicyDetails = policyDetails
+            };
+        }
+
+        [UIAuthorize]
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public virtual async Task<JsonResult> GenerateTrustedPublisherPolicy(string policyName, string owner, string criteria)
+        {
+            User currentUser = GetCurrentUser();
+            if (currentUser == null)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(Strings.DefaultUserSafeExceptionMessage);
+            }
+
+            if (string.IsNullOrWhiteSpace(owner))
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(Strings.TrustedPublisher_PolicyOwnerRequired);
+            }
+
+            var policyCriteria = ViewToPolicyCriteria(criteria);
+
+            // Try adding policy
+            FederatedCredentialPolicyValidationResult result = await _federatedCredentialService.AddPolicyAsync(
+                currentUser, owner, policyCriteria, policyName, FederatedCredentialType.GitHubActions);
+
+            switch (result.Type)
+            {
+                case FederatedCredentialPolicyValidationResultType.BadRequest:
+                    Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                    return Json(result.UserMessage);
+
+                case FederatedCredentialPolicyValidationResultType.Unauthorized:
+                    Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                    return Json(result.UserMessage);
+
+                case FederatedCredentialPolicyValidationResultType.Success:
+                    var model = CreatePublisherViewModel(result.Policy);
+                    return Json(model);
+
+                default:
+                    throw new NotImplementedException($"The policy creation result type '{result.Type}' is not supported.");
+            }
+        }
+
+        [UIAuthorize]
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public virtual async Task<JsonResult> EditTrustedPublisherPolicy(int? federatedCredentialKey, string criteria, string policyName)
+        {
+            var result = GetFederatedCredentialPolicy(federatedCredentialKey);
+            if (result.policy == null)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(result.error);
+            }
+
+            var policyCriteria = ViewToPolicyCriteria(criteria);
+            return await UpdatePolicyAsync(result.policy, policyCriteria, policyName);
+        }
+
+        [HttpPost]
+        [UIAuthorize]
+        [ValidateAntiForgeryToken]
+        public virtual async Task<JsonResult> EnableTrustedPublisherPolicy(int? federatedCredentialKey)
+        {
+            var result = GetFederatedCredentialPolicy(federatedCredentialKey);
+            if (result.policy == null)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(result.error);
+            }
+
+            // Updating temp GitHub Actions policy will reset ValidateBy date.
+            return await UpdatePolicyAsync(result.policy, result.policy.Criteria, result.policy.PolicyName);
+        }
+
+        private async Task<JsonResult> UpdatePolicyAsync(FederatedCredentialPolicy policy, string criteria, string policyName)
+        {
+            var validation = await _federatedCredentialService.UpdatePolicyAsync(policy, criteria, policyName);
+            if (validation.Type == FederatedCredentialPolicyValidationResultType.Unauthorized)
+            {
+                Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                return Json(validation.UserMessage);
+            }
+            if (validation.Type == FederatedCredentialPolicyValidationResultType.BadRequest)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(validation.UserMessage);
+            }
+
+            // Get updated policy details
+            if (CreatePublisherViewModel(validation.Policy) is not TrustedPublisherPolicyViewModel model)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(Strings.TrustedPublisher_Unexpected);
+            }
+
+            return Json(model);
+        }
+
+        private string ViewToPolicyCriteria(string criteria)
+        {
+            // Currently only GitHub Actions policies are expected
+            var details = GitHubPolicyDetailsViewModel.FromViewJson(criteria);
+            return details.Criteria.ToDatabaseJson();
+        }
+
+        [HttpPost]
+        [UIAuthorize]
+        [ValidateAntiForgeryToken]
+        public virtual async Task<ActionResult> RemoveTrustedPublisherPolicy(int? federatedCredentialKey)
+        {
+            User currentUser = GetCurrentUser();
+            if (!_featureFlagService.IsTrustedPublishingEnabled(currentUser))
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(Strings.DefaultUserSafeExceptionMessage);
+            }
+
+            var result = GetFederatedCredentialPolicy(federatedCredentialKey);
+            if (result.policy == null)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(result.error);
+            }
+
+            await _federatedCredentialService.DeletePolicyAsync(result.policy);
+            return Json(Strings.TrustedPolicyRemoved);
+        }
+
+        private (FederatedCredentialPolicy policy, string error) GetFederatedCredentialPolicy(int? federatedCredentialKey)
+        {
+            if (federatedCredentialKey is not int key ||
+                _federatedCredentialService.GetPolicyByKey(key) is not FederatedCredentialPolicy policy)
+            {
+                return (null, Strings.TrustedPublisher_Unexpected);
+            }
+
+            // Sanity check. The policy must be created by current user
+            var currentUser = GetCurrentUser();
+            if (currentUser.Key != policy.CreatedByUserKey)
+            {
+                return (null, Strings.Unauthorized);
+            }
+
+            return (policy, null);
+        }
+
         [UIAuthorize]
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -913,6 +1259,13 @@ namespace NuGetGallery
                 return Json(Strings.ApiKeyOwnerRequired);
             }
 
+            var currentUser = GetCurrentUser();
+            if (currentUser.IsLocked)
+            {
+                Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return Json(ServicesStrings.UserAccountIsLocked);
+            }
+
             // Get the owner scope
             User scopeOwner = UserService.FindByUsername(owner);
             if (scopeOwner == null)
@@ -921,8 +1274,8 @@ namespace NuGetGallery
                 return Json(Strings.UserNotFound);
             }
 
-            var resolvedScopes = BuildScopes(scopeOwner, scopes, subjects);
-            if (!VerifyScopes(resolvedScopes))
+            var resolvedScopes = _credentialBuilder.BuildScopes(scopeOwner, scopes, subjects);
+            if (!_credentialBuilder.VerifyScopes(GetCurrentUser(), resolvedScopes))
             {
                 Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 return Json(Strings.ApiKeyScopesNotAllowed);
@@ -944,7 +1297,7 @@ namespace NuGetGallery
 
             var emailMessage = new CredentialAddedMessage(
                     _config,
-                    GetCurrentUser(),
+                    currentUser,
                     newCredentialViewModel.GetCredentialTypeInfo());
             await MessageService.SendMessageAsync(emailMessage);
 
@@ -975,7 +1328,7 @@ namespace NuGetGallery
 
             var scopeOwner = cred.Scopes.GetOwnerScope();
             var scopes = cred.Scopes.Select(x => x.AllowedAction).Distinct().ToArray();
-            var newScopes = BuildScopes(scopeOwner, scopes, subjects);
+            var newScopes = _credentialBuilder.BuildScopes(scopeOwner, scopes, subjects);
 
             await AuthenticationService.EditCredentialScopes(user, cred, newScopes);
 
@@ -997,6 +1350,7 @@ namespace NuGetGallery
             var newCredential = _credentialBuilder.CreateApiKey(expiration, out string plaintextApiKey);
             newCredential.Description = description;
             newCredential.Scopes = scopes;
+            newCredential.WasCreatedSecurely = User.WasMultiFactorAuthenticated();
 
             await AuthenticationService.AddCredential(user, newCredential);
 
@@ -1004,86 +1358,6 @@ namespace NuGetGallery
             credentialViewModel.Value = plaintextApiKey;
 
             return credentialViewModel;
-        }
-
-        private static IDictionary<string, IActionRequiringEntityPermissions[]> AllowedActionToActionRequiringEntityPermissionsMap = new Dictionary<string, IActionRequiringEntityPermissions[]>
-        {
-            { NuGetScopes.PackagePush, new IActionRequiringEntityPermissions[] { ActionsRequiringPermissions.UploadNewPackageId, ActionsRequiringPermissions.UploadNewPackageVersion } },
-            { NuGetScopes.PackagePushVersion, new [] { ActionsRequiringPermissions.UploadNewPackageVersion } },
-            { NuGetScopes.PackageUnlist, new [] { ActionsRequiringPermissions.UnlistOrRelistPackage } },
-            { NuGetScopes.PackageVerify, new [] { ActionsRequiringPermissions.VerifyPackage } },
-        };
-
-        private bool VerifyScopes(IEnumerable<Scope> scopes)
-        {
-            if (!scopes.Any())
-            {
-                // All API keys must have at least one scope.
-                return false;
-            }
-
-            foreach (var scope in scopes)
-            {
-                if (string.IsNullOrEmpty(scope.AllowedAction))
-                {
-                    // All scopes must have an allowed action.
-                    return false;
-                }
-
-                // Get the list of actions allowed by this scope.
-                var actions = new List<IActionRequiringEntityPermissions>();
-                foreach (var allowedAction in AllowedActionToActionRequiringEntityPermissionsMap.Keys)
-                {
-                    if (scope.AllowsActions(allowedAction))
-                    {
-                        actions.AddRange(AllowedActionToActionRequiringEntityPermissionsMap[allowedAction]);
-                    }
-                }
-
-                if (!actions.Any())
-                {
-                    // A scope should allow at least one action.
-                    return false;
-                }
-
-                foreach (var action in actions)
-                {
-                    if (!action.IsAllowedOnBehalfOfAccount(GetCurrentUser(), scope.Owner))
-                    {
-                        // The user must be able to perform the actions allowed by the scope on behalf of the scope's owner.
-                        return false;
-                    }
-                }
-            }
-
-            return true;
-        }
-
-        private IList<Scope> BuildScopes(User scopeOwner, string[] scopes, string[] subjects)
-        {
-            var result = new List<Scope>();
-
-            var subjectsList = subjects?.Where(s => !string.IsNullOrWhiteSpace(s)).ToList() ?? new List<string>();
-
-            // No package filtering information was provided. So allow any pattern.
-            if (!subjectsList.Any())
-            {
-                subjectsList.Add(NuGetPackagePattern.AllInclusivePattern);
-            }
-
-            if (scopes != null)
-            {
-                foreach (var scope in scopes)
-                {
-                    result.AddRange(subjectsList.Select(subject => new Scope(scopeOwner, subject, scope)));
-                }
-            }
-            else
-            {
-                result.AddRange(subjectsList.Select(subject => new Scope(scopeOwner, subject, NuGetScopes.All)));
-            }
-
-            return result;
         }
 
         private static IList<Scope> BuildScopes(IEnumerable<Scope> scopes)
@@ -1189,7 +1463,8 @@ namespace NuGetGallery
                 user.Username,
                 user.PasswordResetToken,
                 forgotPassword,
-                relativeUrl: false);
+                relativeUrl: false,
+                supportEmail: true);
 
             var message = new PasswordResetInstructionsMessage(
                 MessageServiceConfiguration,

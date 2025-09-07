@@ -1,11 +1,10 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using Microsoft.WindowsAzure.Storage.Blob;
 
 namespace NuGetGallery
 {
@@ -25,6 +24,14 @@ namespace NuGetGallery
         /// <param name="ifNoneMatch">The <see cref="IFileReference.ContentId"/> value to use in an If-None-Match request</param>
         /// <returns>A <see cref="IFileReference"/> representing the file reference</returns>
         Task<IFileReference> GetFileReferenceAsync(string folderName, string fileName, string ifNoneMatch = null);
+        
+        /// <summary>
+        /// Gets a file URI.
+        /// </summary>
+        /// <param name="folderName">The folder containing the file.</param>
+        /// <param name="fileName">The file within the <paramref name="folderName"/>.</param>
+        /// <returns>A <see cref="Uri"/> for the specified file.</returns>
+        Task<Uri> GetFileUriAsync(string folderName, string fileName);
 
         /// <summary>
         /// Generates the storage file URI (which is optionally time limited)
@@ -46,7 +53,23 @@ namespace NuGetGallery
         /// <param name="permissions">The permissions to give to the privileged URI.</param>
         /// <param name="endOfAccess">The time when the access ends.</param>
         /// <returns>The URI with privileged access.</returns>
-        Task<Uri> GetPriviledgedFileUriAsync(
+        Task<Uri> GetPrivilegedFileUriAsync(
+            string folderName,
+            string fileName,
+            FileUriPermissions permissions,
+            DateTimeOffset endOfAccess);
+
+        /// <summary>
+        /// Generates a storage file URI giving certain permissions for the specific file via delegation SAS. For example, this method can
+        /// be used to generate a URI that allows the caller to either delete (via
+        /// <see cref="FileUriPermissions.Delete"/>) or read (via <see cref="FileUriPermissions.Read"/>) the file.
+        /// </summary>
+        /// <param name="folderName">The folder name containing the file.</param>
+        /// <param name="fileName">The file name.</param>
+        /// <param name="permissions">The permissions to give to the privileged URI.</param>
+        /// <param name="endOfAccess">The time when the access ends.</param>
+        /// <returns>The URI with privileged delegation SAS access.</returns>
+        Task<Uri> GetPrivilegedFileUriWithDelegationSasAsync(
             string folderName,
             string fileName,
             FileUriPermissions permissions,
@@ -147,7 +170,7 @@ namespace NuGetGallery
         Task SetPropertiesAsync(
             string folderName,
             string fileName,
-            Func<Lazy<Task<Stream>>, BlobProperties, Task<bool>> updatePropertiesAsync);
+            Func<Lazy<Task<Stream>>, ICloudBlobProperties, Task<bool>> updatePropertiesAsync);
 
         /// <summary>
         /// Returns the etag value for the specified blob. If the blob does not exists it will return null.

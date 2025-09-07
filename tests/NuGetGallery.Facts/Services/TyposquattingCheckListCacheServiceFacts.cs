@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -35,7 +35,7 @@ namespace NuGetGallery
                 }).AsQueryable();
 
         [Fact]
-        public void WhenGettingCheckListFromMultipleThreadsItIsInitializedOnce()
+        public async Task WhenGettingCheckListFromMultipleThreadsItIsInitializedOnce()
         {
             // Arrange
             var mockPackageService = new Mock<IPackageService>();
@@ -43,7 +43,11 @@ namespace NuGetGallery
                 .Setup(x => x.GetAllPackageRegistrations())
                 .Returns(PacakgeRegistrationsList);
 
-            var newService = new TyposquattingCheckListCacheService();
+            var mockTyposquattingServiceHelper = new Mock<ITyposquattingServiceHelper>();
+            mockTyposquattingServiceHelper.Setup(helper => helper.NormalizeString(It.IsAny<string>()))
+                .Returns((string str) => str.ToLower());
+
+            var newService = new TyposquattingCheckListCacheService(mockTyposquattingServiceHelper.Object);
 
             // Act
             int tasksNum = 3;
@@ -56,7 +60,7 @@ namespace NuGetGallery
                     newService.GetTyposquattingCheckList(_packageIds.Count, TimeSpan.FromHours(24), mockPackageService.Object);
                 });
             }
-            Task.WaitAll(tasks);
+            await Task.WhenAll(tasks);
 
             // Assert
             mockPackageService.Verify(
@@ -73,7 +77,10 @@ namespace NuGetGallery
                 .Setup(x => x.GetAllPackageRegistrations())
                 .Returns(PacakgeRegistrationsList);
 
-            var newService = new TyposquattingCheckListCacheService();
+            var mockTyposquattingServiceHelper = new Mock<ITyposquattingServiceHelper>();
+            mockTyposquattingServiceHelper.Setup(helper => helper.NormalizeString(It.IsAny<string>()))
+                  .Returns((string str) => str.ToLower());
+            var newService = new TyposquattingCheckListCacheService(mockTyposquattingServiceHelper.Object);
 
             // Act
             newService.GetTyposquattingCheckList(_packageIds.Count, TimeSpan.FromHours(0), mockPackageService.Object);
@@ -95,7 +102,10 @@ namespace NuGetGallery
                 .Setup(x => x.GetAllPackageRegistrations())
                 .Returns(PacakgeRegistrationsList);
 
-            var newService = new TyposquattingCheckListCacheService();
+            var mockTyposquattingServiceHelper = new Mock<ITyposquattingServiceHelper>();
+            mockTyposquattingServiceHelper.Setup(helper => helper.NormalizeString(It.IsAny<string>()))
+                .Returns((string str) => str.ToLower());
+            var newService = new TyposquattingCheckListCacheService(mockTyposquattingServiceHelper.Object);
 
             // Act
             newService.GetTyposquattingCheckList(_packageIds.Count, TimeSpan.FromHours(24), mockPackageService.Object);
@@ -117,7 +127,8 @@ namespace NuGetGallery
                 .Returns(PacakgeRegistrationsList);
             var checkListConfiguredLength = -1;
 
-            var newService = new TyposquattingCheckListCacheService();
+            var mockTyposquattingServiceHelper = new Mock<ITyposquattingServiceHelper>();
+            var newService = new TyposquattingCheckListCacheService(mockTyposquattingServiceHelper.Object);
 
             // Act
             var exception = Assert.Throws<ArgumentOutOfRangeException>(
@@ -137,7 +148,8 @@ namespace NuGetGallery
                 .Setup(x => x.GetAllPackageRegistrations())
                 .Returns(PacakgeRegistrationsList);
 
-            var newService = new TyposquattingCheckListCacheService();
+            var mockTyposquattingServiceHelper = new Mock<ITyposquattingServiceHelper>();
+            var newService = new TyposquattingCheckListCacheService(mockTyposquattingServiceHelper.Object);
 
             // Act
             var exception = Assert.Throws<ArgumentOutOfRangeException>(
@@ -151,7 +163,8 @@ namespace NuGetGallery
         public void CheckNullPackageService()
         {
             // Arrange
-            var newService = new TyposquattingCheckListCacheService();
+            var mockTyposquattingServiceHelper = new Mock<ITyposquattingServiceHelper>();
+            var newService = new TyposquattingCheckListCacheService(mockTyposquattingServiceHelper.Object);
 
             // Act
             var exception = Assert.Throws<ArgumentNullException>(

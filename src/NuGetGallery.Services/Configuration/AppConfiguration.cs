@@ -48,9 +48,6 @@ namespace NuGetGallery.Configuration
         [DisplayName("AzureStorage.Content.ConnectionString")]
         public string AzureStorage_Content_ConnectionString { get; set; }
 
-        [DisplayName("AzureStorage.Errors.ConnectionString")]
-        public string AzureStorage_Errors_ConnectionString { get; set; }
-
         [DisplayName("AzureStorage.Packages.ConnectionString")]
         public string AzureStorage_Packages_ConnectionString { get; set; }
 
@@ -59,6 +56,9 @@ namespace NuGetGallery.Configuration
 
         [DisplayName("AzureStorage.Statistics.ConnectionString")]
         public string AzureStorage_Statistics_ConnectionString { get; set; }
+
+        [DisplayName("AzureStorage.Statistics.ConnectionString.Alternate")]
+        public string AzureStorage_Statistics_ConnectionString_Alternate { get; set; }
 
         [DisplayName("AzureStorage.Uploads.ConnectionString")]
         public string AzureStorage_Uploads_ConnectionString { get; set; }
@@ -71,7 +71,14 @@ namespace NuGetGallery.Configuration
         /// </summary>
         public bool AzureStorageReadAccessGeoRedundant { get; set; }
 
+        public bool AzureStorageUseMsi { get; set; } = false;
+
+        public string AzureStorageMsiClientId { get; set; } = null;
+
         public TimeSpan FeatureFlagsRefreshInterval { get; set; }
+
+        [DefaultValue(true)]
+        public bool AdminPanelEnabled { get; set; }
 
         public bool AdminPanelDatabaseAccessEnabled { get; set; }
 
@@ -205,6 +212,11 @@ namespace NuGetGallery.Configuration
         public string SiteRoot { get; set; }
 
         /// <summary>
+        /// Gets the protocol-independent support email site root
+        /// </summary>
+        public string SupportEmailSiteRoot { get; set; }
+
+        /// <summary>
         /// Private key for verifying recaptcha user response.
         /// </summary>
         public string ReCaptchaPrivateKey { get; set; }
@@ -233,9 +245,9 @@ namespace NuGetGallery.Configuration
         public string EnforcedAuthProviderForAdmin { get; set; }
 
         /// <summary>
-        /// Gets a string indicating which AAD Tenant Id should be used for administrators. 
+        /// Gets a string indicating which Microsoft Entra tenant ID should be used for administrators. 
         /// When specified, the gallery will ensure admin users are logging in using only the specified tenant ID.
-        /// Blank means any AAD tenant ID can be used by administrators.
+        /// Blank means any Microsoft Entra tenant ID can be used by administrators.
         /// </summary>
         public string EnforcedTenantIdForAdmin { get; set; }
 
@@ -403,8 +415,6 @@ namespace NuGetGallery.Configuration
         [DefaultValue(null)]
         public string DeploymentLabel { get; set; }
 
-        public string UsabillaFeedbackButtonId { get; set; }
-
         [DefaultValue(null)]
         public int? MinWorkerThreads { get; set; }
         [DefaultValue(null)]
@@ -414,5 +424,8 @@ namespace NuGetGallery.Configuration
         [DefaultValue(null)]
         public int? MaxIoThreads { get; set; }
         public string InternalMicrosoftTenantKey { get; set; }
+        public string AdminSenderUser { get; set; }
+        [DefaultValue(16 * 1024 * 1024)]
+        public int MaxJsonLengthOverride { get; set; }
     }
 }

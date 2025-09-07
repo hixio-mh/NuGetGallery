@@ -5,10 +5,6 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
-using Microsoft.WindowsAzure.Storage.Blob.Protocol;
-using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Newtonsoft.Json;
 using NuGetGallery.Auditing.Obfuscation;
 
@@ -21,21 +17,17 @@ namespace NuGetGallery.Auditing
     {
         public static readonly string DefaultContainerName = "auditing";
 
-        private CloudBlobContainer _auditContainer;
-        private string _instanceId;
-        private string _localIP;
+        private Func<ICloudBlobContainer> _auditContainerFactory;
         private Func<Task<AuditActor>> _getOnBehalfOf;
 
-        public CloudAuditingService(string instanceId, string localIP, string storageConnectionString, bool readAccessGeoRedundant, Func<Task<AuditActor>> getOnBehalfOf)
-            : this(instanceId, localIP, GetContainer(storageConnectionString, readAccessGeoRedundant), getOnBehalfOf)
+        public CloudAuditingService(Func<ICloudBlobClient> cloudBlobClientFactory, Func<Task<AuditActor>> getOnBehalfOf)
+            : this(() => GetContainer(cloudBlobClientFactory), getOnBehalfOf)
         {
         }
 
-        public CloudAuditingService(string instanceId, string localIP, CloudBlobContainer auditContainer, Func<Task<AuditActor>> getOnBehalfOf)
+        public CloudAuditingService(Func<ICloudBlobContainer> auditContainerFactory, Func<Task<AuditActor>> getOnBehalfOf)
         {
-            _instanceId = instanceId;
-            _localIP = localIP;
-            _auditContainer = auditContainer;
+            _auditContainerFactory = auditContainerFactory;
             _getOnBehalfOf = getOnBehalfOf;
         }
 
@@ -56,80 +48,56 @@ namespace NuGetGallery.Auditing
                 $"{filePath.Replace(Path.DirectorySeparatorChar, '/')}/" +
                 $"{Guid.NewGuid().ToString("N")}-{action.ToLowerInvariant()}.audit.v1.json";
 
-            var blob = _auditContainer.GetBlockBlobReference(fullPath);
+            var container = _auditContainerFactory();
+            var blob = container.GetBlobReference(fullPath);
             bool retry = false;
             try
             {
                 await WriteBlob(auditData, fullPath, blob);
             }
-            catch (StorageException ex)
+            catch (CloudBlobContainerNotFoundException)
             {
-                if (ex.RequestInformation?.ExtendedErrorInformation?.ErrorCode == BlobErrorCodeStrings.ContainerNotFound)
-                {
-                    retry = true;
-                }
-                else
-                {
-                    throw;
-                }
+                retry = true;
             }
 
             if (retry)
             {
                 // Create the container and try again,
                 // this time we let exceptions bubble out
-                await Task.Factory.FromAsync(
-                    (cb, s) => _auditContainer.BeginCreateIfNotExists(cb, s),
-                    ar => _auditContainer.EndCreateIfNotExists(ar),
-                    null);
+                await container.CreateIfNotExistAsync(enablePublicAccess: false);
                 await WriteBlob(auditData, fullPath, blob);
             }
         }
 
-        private static CloudBlobContainer GetContainer(string storageConnectionString, bool readAccessGeoRedundant)
+        private static ICloudBlobContainer GetContainer(Func<ICloudBlobClient> cloudBlobClientFactory)
         {
-            var cloudBlobClient = CloudStorageAccount.Parse(storageConnectionString).CreateCloudBlobClient();
-            if (readAccessGeoRedundant)
-            {
-                cloudBlobClient.DefaultRequestOptions.LocationMode = LocationMode.PrimaryThenSecondary;
-            }
+            var cloudBlobClient = cloudBlobClientFactory();
             return cloudBlobClient.GetContainerReference(DefaultContainerName);
         }
 
-        private static async Task WriteBlob(string auditData, string fullPath, CloudBlockBlob blob)
+        private static async Task WriteBlob(string auditData, string fullPath, ISimpleCloudBlob blob)
         {
             try
             {
-                var strm = await Task.Factory.FromAsync(
-                    (cb, s) => blob.BeginOpenWrite(
-                        AccessCondition.GenerateIfNoneMatchCondition("*"),
-                        new BlobRequestOptions(),
-                        new OperationContext(),
-                        cb, s),
-                    ar => blob.EndOpenWrite(ar),
-                    null);
-                using (var writer = new StreamWriter(strm))
+                using (var stream = await blob.OpenWriteAsync(AccessConditionWrapper.GenerateIfNoneMatchCondition("*")))
+                using (var writer = new StreamWriter(stream))
                 {
                     await writer.WriteAsync(auditData);
                 }
             }
-            catch (StorageException ex)
+            catch (CloudBlobConflictException ex)
             {
-                if (ex.RequestInformation != null && ex.RequestInformation.HttpStatusCode == 409)
-                {
-                    // Blob already existed!
-                    throw new InvalidOperationException(String.Format(
-                        CultureInfo.CurrentCulture,
-                        CoreStrings.CloudAuditingService_DuplicateAuditRecord,
-                        fullPath), ex);
-                }
-                throw;
+                // Blob already existed!
+                throw new InvalidOperationException(String.Format(
+                    CultureInfo.CurrentCulture,
+                    CoreStrings.CloudAuditingService_DuplicateAuditRecord,
+                    fullPath), ex.InnerException);
             }
         }
 
-        public Task<bool> IsAvailableAsync(BlobRequestOptions options, OperationContext operationContext)
+        public Task<bool> IsAvailableAsync(CloudBlobLocationMode? locationMode)
         {
-            return _auditContainer.ExistsAsync(options, operationContext);
+            return _auditContainerFactory().ExistsAsync(locationMode);
         }
 
         public override string RenderAuditEntry(AuditEntry entry)

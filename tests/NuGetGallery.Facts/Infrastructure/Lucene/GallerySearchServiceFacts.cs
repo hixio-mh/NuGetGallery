@@ -64,15 +64,28 @@ namespace NuGetGallery.Infrastructure.Search
         }
 
         [Theory]
-        [InlineData(null, null, false, SortOrder.Relevance, 1, 10, false, false, false, false, null, null, "q=&skip=1&take=10&sortBy=relevance&luceneQuery=false")]
-        [InlineData("query", "projectTypeFilter", true, SortOrder.LastEdited, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel", "q=query&skip=1&take=10&sortBy=lastEdited&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true")]
-        [InlineData("query", "projectTypeFilter", true, SortOrder.Published, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel", "q=query&skip=1&take=10&sortBy=published&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true")]
-        [InlineData("query", "projectTypeFilter", true, SortOrder.TitleAscending, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel", "q=query&skip=1&take=10&sortBy=title-asc&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true")]
-        [InlineData("query", "projectTypeFilter", true, SortOrder.TitleDescending, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel", "q=query&skip=1&take=10&sortBy=title-desc&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true")]
-
+        [InlineData(null, null, false, "", "", true, "all", "dependency", SortOrder.Relevance, 1, 10, false, false, false, false, null, null, 
+            "q=&skip=1&take=10&includeComputedFrameworks=true&frameworkFilterMode=all&packageType=dependency&luceneQuery=false&sortBy=relevance")]
+        [InlineData("query", "projectTypeFilter", true, null, null, true, "all", "dotnettool" ,SortOrder.LastEdited, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel",
+            "q=query&skip=1&take=10&includeComputedFrameworks=true&frameworkFilterMode=all&packageType=dotnettool&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true&sortBy=lastEdited")]
+        [InlineData("query", "projectTypeFilter", true, "net", "netstandard2.1", true, "all", "template", SortOrder.Published, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel",
+            "q=query&skip=1&take=10&frameworks=net&tfms=netstandard2.1&includeComputedFrameworks=true&frameworkFilterMode=all&packageType=template&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true&sortBy=published")]
+        [InlineData("query", "projectTypeFilter", true, "", "net472", true, "all", "dependency", SortOrder.TitleAscending, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel",
+            "q=query&skip=1&take=10&tfms=net472&includeComputedFrameworks=true&frameworkFilterMode=all&packageType=dependency&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true&sortBy=title-asc")]
+        [InlineData("query", "projectTypeFilter", true, "netstandard,netframework,", "netcoreapp3.1,", true, "all", "dependency", SortOrder.TitleDescending, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel",
+            "q=query&skip=1&take=10&frameworks=netstandard%2Cnetframework%2C&tfms=netcoreapp3.1%2C&includeComputedFrameworks=true&frameworkFilterMode=all&packageType=dependency&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true&sortBy=title-desc")]
+        [InlineData("query", "projectTypeFilter", true, "netcoreapp", "net481,net5.0", true, "any", null, SortOrder.TitleDescending, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel",
+            "q=query&skip=1&take=10&frameworks=netcoreapp&tfms=net481%2Cnet5.0&includeComputedFrameworks=true&frameworkFilterMode=any&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true&sortBy=title-desc")]
+        [InlineData("query", "projectTypeFilter", true, "", "netstandard17.9", false, "all", "", SortOrder.TitleDescending, 1, 10, true, true, true, true, "supportedFramework", "semVerLevel",
+            "q=query&skip=1&take=10&tfms=netstandard17.9&includeComputedFrameworks=false&frameworkFilterMode=all&semVerLevel=semVerLevel&supportedFramework=supportedFramework&projectType=projectTypeFilter&prerelease=true&explanation=true&ignoreFilter=true&countOnly=true&sortBy=title-desc")]
         public async Task SearchArgumentsAreCorrectSet(string query,
             string projectTypeFilter,
             bool includePrerelease,
+            string frameworks,
+            string tfms,
+            bool includeComputedFrameworks,
+            string frameworkFilterMode,
+            string packageType,
             SortOrder sortBy,
             int skip,
             int take,
@@ -91,6 +104,11 @@ namespace NuGetGallery.Infrastructure.Search
             var response = await gallerySearchClient.Search(query,
                 projectTypeFilter,
                 includePrerelease,
+                frameworks,
+                tfms,
+                includeComputedFrameworks,
+                frameworkFilterMode,
+                packageType,
                 sortBy,
                 skip,
                 take,
@@ -127,6 +145,8 @@ namespace NuGetGallery.Infrastructure.Search
             {SortOrder.TitleDescending, "title-desc"},
             {SortOrder.CreatedAscending, "created-asc"},
             {SortOrder.CreatedDescending, "created-desc"},
+            {SortOrder.TotalDownloadsAscending, "totalDownloads-asc"},
+            {SortOrder.TotalDownloadsDescending, "totalDownloads-desc"},
         };
 
         public class ResilientClientForTest : IResilientSearchClient

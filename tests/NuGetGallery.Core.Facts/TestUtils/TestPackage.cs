@@ -43,7 +43,8 @@ namespace NuGetGallery
             Func<string> getCustomNodes = null,
             string licenseExpression = null,
             string licenseFilename = null,
-            string iconFilename = null)
+            string iconFilename = null,
+            string readmeFilename = null)
         {
             var fullNuspec = (@"<?xml version=""1.0""?>
                 <package xmlns=""http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd"">
@@ -64,6 +65,7 @@ namespace NuGetGallery
                         <licenseUrl>" + (licenseUrl?.AbsoluteUri ?? string.Empty) + @"</licenseUrl>
                         " + WriteLicense(licenseExpression, licenseFilename) + @"
                         " + WriteIcon(iconFilename) + @"
+                        " + WriteReadme(readmeFilename) + @"
                         <projectUrl>" + (projectUrl?.ToString() ?? string.Empty) + @"</projectUrl>
                         <iconUrl>" + (iconUrl?.ToString() ?? string.Empty) + @"</iconUrl>
                         <packageTypes>" + WritePackageTypes(packageTypes) + @"</packageTypes>
@@ -116,6 +118,16 @@ namespace NuGetGallery
             return string.Empty;
         }
 
+        private static string WriteReadme(string readmeFilename)
+        {
+            if (readmeFilename != null)
+            {
+                return $"<readme>{readmeFilename}</readme>";
+            }
+
+            return string.Empty;
+        }
+
         private static string WriteRepositoryMetadata(RepositoryMetadata repositoryMetadata)
         {
             return repositoryMetadata == null
@@ -144,7 +156,7 @@ namespace NuGetGallery
 
                 if (packageType.Version != null)
                 {
-                    output.AppendFormat(" version=\"{0}\"", packageType.Version.ToString());
+                    output.AppendFormat(" version=\"{0}\"", packageType.Version);
                 }
 
                 output.Append("/>");
@@ -167,7 +179,7 @@ namespace NuGetGallery
                 {
                     builder.AppendFormat(" targetFramework=\"{0}\"", packageDependencyGroup.TargetFramework.GetShortFolderName());
                 }
-                builder.Append(">");
+                builder.Append('>');
 
                 foreach (var packageDependency in packageDependencyGroup.Packages)
                 {
@@ -176,7 +188,7 @@ namespace NuGetGallery
                     {
                         builder.AppendFormat(" version=\"{0}\"", packageDependency.VersionRange);
                     }
-                    builder.Append(">");
+                    builder.Append('>');
                     builder.Append("</dependency>");
                 }
 
@@ -215,7 +227,11 @@ namespace NuGetGallery
             string licenseFilename = null,
             byte[] licenseFileContents = null,
             string iconFilename = null,
-            byte[] iconFileContents = null)
+            byte[] iconFileContents = null,
+            string readmeFilename = null,
+            byte[] readmeFileContents = null,
+            string mcpServerMetadataFileName = null,
+            byte[] mcpServerMetadataFileContents = null)
         {
             return CreateTestPackageStream(packageArchive =>
             {
@@ -225,11 +241,13 @@ namespace NuGetGallery
                     WriteNuspec(stream, true, id, version, title, summary, authors, owners, description, tags, language,
                         copyright, releaseNotes, minClientVersion, licenseUrl, projectUrl, iconUrl,
                         requireLicenseAcceptance, developmentDependency, packageDependencyGroups, packageTypes, isSymbolPackage, repositoryMetadata,
-                        getCustomNuspecNodes, licenseExpression, licenseFilename, iconFilename);
+                        getCustomNuspecNodes, licenseExpression, licenseFilename, iconFilename, readmeFilename);
                 }
 
                 licenseFilename = AddBinaryFile(packageArchive, licenseFilename, licenseFileContents);
                 iconFilename = AddBinaryFile(packageArchive, iconFilename, iconFileContents);
+                readmeFilename = AddBinaryFile(packageArchive, readmeFilename, readmeFileContents);
+                mcpServerMetadataFileName = AddBinaryFile(packageArchive, mcpServerMetadataFileName, mcpServerMetadataFileContents);
 
                 if (populatePackage != null)
                 {

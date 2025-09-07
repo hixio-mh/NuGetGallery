@@ -105,17 +105,21 @@ namespace NuGetGallery
         public string LicenseExpression { get; set; }
         public IReadOnlyCollection<CompositeLicenseExpressionSegmentViewModel> LicenseExpressionSegments { get; set; }
         public string LicenseFileContents { get; set; }
+        public RenderedMarkdownResult LicenseFileContentsHtml { get; set; }
         public string MinClientVersionDisplay { get; set; }
         public string ProjectUrl { get; set; }
         public string RepositoryUrl { get; set; }
         public string RepositoryType { get; set; }
         public string ReleaseNotes { get; set; }
+        public RenderedMarkdownResult ReadmeFileContents { get; set; }
         public bool RequiresLicenseAcceptance { get; set; }
         public string Summary { get; set; }
         public string Tags { get; set; }
         public string Title { get; set; }
         public bool IsSymbolsPackage { get; set; }
         public bool HasExistingAvailableSymbols { get; set; }
+        public bool IsMarkdigMdSyntaxHighlightEnabled { get; set; }
+        public bool IsDisplayUploadWarningV2Enabled { get; set; }
 
         public List<JsonValidationMessage> Warnings { get; set; } = new List<JsonValidationMessage>();
 

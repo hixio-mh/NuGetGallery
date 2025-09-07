@@ -10,6 +10,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -34,11 +35,11 @@ namespace NuGetGallery
             [InlineData("i", "ı")]
             [InlineData("I", "İ")]
             [InlineData("I", "ı")]
-            public void ReturnsZeroWhenIdDoesNotExist(string inputId, string contentId)
+            public async Task ReturnsZeroWhenIdDoesNotExist(string inputId, string contentId)
             {
                 // Arrange
                 _content = $"[[\"{contentId}\",[\"4.6.0\",23],[\"4.6.2\",42]]";
-                _target.Refresh();
+                await _target.RefreshAsync();
 
                 // Act
                 var found = _target.TryGetDownloadCountForPackageRegistration(inputId, out var actual);
@@ -54,11 +55,11 @@ namespace NuGetGallery
             [InlineData("nuget.versioning", "NUGET.VERSIONING")]
             [InlineData("İ", "İ")]
             [InlineData("ı", "ı")]
-            public void ReturnsSumOfVersionsWhenIdExists(string inputId, string contentId)
+            public async Task ReturnsSumOfVersionsWhenIdExists(string inputId, string contentId)
             {
                 // Arrange
                 _content = $"[[\"{contentId}\",[\"4.6.0\",23],[\"4.6.2\",42]]";
-                _target.Refresh();
+                await _target.RefreshAsync();
 
                 // Act
                 var found = _target.TryGetDownloadCountForPackageRegistration(inputId, out var actual);
@@ -93,7 +94,7 @@ namespace NuGetGallery
                     iteration++;
                     var version = $"0.0.0-beta{iteration}";
                     _content = $"[[\"{id}\",[\"{version}\",1]]";
-                    _target.Refresh();
+                    await _target.RefreshAsync();
                     await Task.Delay(5);
                 }
             }
@@ -113,10 +114,10 @@ namespace NuGetGallery
         public class TheTryGetDownloadCountForPackageMethod : BaseFacts
         {
             [Fact]
-            public void ReturnsZeroWhenVersionDoesNotExist()
+            public async Task ReturnsZeroWhenVersionDoesNotExist()
             {
                 // Arrange
-                _target.Refresh();
+                await _target.RefreshAsync();
 
                 // Act
                 var found = _target.TryGetDownloadCountForPackage("NuGet.Versioning", "9.9.9", out var actual);
@@ -127,10 +128,10 @@ namespace NuGetGallery
             }
 
             [Fact]
-            public void ReturnsCountWhenVersionExists()
+            public async Task ReturnsCountWhenVersionExists()
             {
                 // Arrange
-                _target.Refresh();
+                await _target.RefreshAsync();
 
                 // Act
                 var found = _target.TryGetDownloadCountForPackage("NuGet.Versioning", "4.6.0", out var actual);
@@ -144,13 +145,23 @@ namespace NuGetGallery
         public class BaseFacts
         {
             internal readonly Mock<ITelemetryService> _telemetryService;
+            internal readonly Mock<ICloudBlobClient> _cloudBlobClientMock;
             internal string _content;
-            internal Func<IDictionary<string, int>, int> _calculateSum;
+            internal Func<IDictionary<string, long>, long> _calculateSum;
             internal TestableCloudDownloadCountService _target;
 
             public BaseFacts()
             {
                 _telemetryService = new Mock<ITelemetryService>();
+                _cloudBlobClientMock = new Mock<ICloudBlobClient>();
+                var containerMock = new Mock<ICloudBlobContainer>();
+                _cloudBlobClientMock
+                    .Setup(cbc => cbc.GetContainerReference("nuget-cdnstats"))
+                    .Returns(containerMock.Object);
+                var blobMock = new Mock<ISimpleCloudBlob>();
+                containerMock.Setup(c => c.GetBlobReference("downloads.v1.json"))
+                    .Returns(blobMock.Object);
+
                 _content = "[[\"NuGet.Versioning\",[\"4.6.0\",23],[\"4.6.2\",42]]";
                 _calculateSum = null;
                 _target = new TestableCloudDownloadCountService(this);
@@ -162,12 +173,15 @@ namespace NuGetGallery
             private readonly BaseFacts _baseFacts;
 
             public TestableCloudDownloadCountService(BaseFacts baseFacts)
-                    : base(baseFacts._telemetryService.Object, "UseDevelopmentStorage=true", readAccessGeoRedundant: true)
+                    : base(
+                          baseFacts._telemetryService.Object,
+                          () => baseFacts._cloudBlobClientMock.Object,
+                          Mock.Of<ILogger<CloudDownloadCountService>>())
             {
                 _baseFacts = baseFacts;
             }
 
-            protected override int CalculateSum(ConcurrentDictionary<string, int> versions)
+            protected override long CalculateSum(ConcurrentDictionary<string, long> versions)
             {
                 if (_baseFacts._calculateSum == null)
                 {
@@ -177,14 +191,14 @@ namespace NuGetGallery
                 return _baseFacts._calculateSum(versions);
             }
 
-            protected override Stream GetBlobStream()
+            protected override Task<Stream> GetBlobStreamAsync()
             {
                 if (_baseFacts._content == null)
                 {
-                    return null;
+                    return Task.FromResult<Stream>(null);
                 }
 
-                return new MemoryStream(Encoding.UTF8.GetBytes(_baseFacts._content));
+                return Task.FromResult<Stream>(new MemoryStream(Encoding.UTF8.GetBytes(_baseFacts._content)));
             }
         }
     }

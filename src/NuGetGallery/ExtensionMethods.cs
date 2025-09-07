@@ -2,9 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Security;
@@ -14,11 +12,9 @@ using System.Text;
 using System.Web;
 using System.Web.Mvc;
 using System.Web.Mvc.Html;
-using System.Web.WebPages;
 using Microsoft.Owin;
 using Microsoft.Owin.Security;
 using NuGet.Frameworks;
-using NuGet.Packaging;
 using NuGet.Services.Entities;
 using NuGetGallery.Helpers;
 
@@ -96,7 +92,7 @@ namespace NuGetGallery
         {
             if (IsError(htmlHelper, expression))
             {
-                return MvcHtmlString.Create("has-error");
+                return MvcHtmlString.Create("has-error-brand");
             }
             else
             {
@@ -106,23 +102,46 @@ namespace NuGetGallery
 
         public static HtmlString ShowLabelFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression)
         {
-            return ShowLabelFor(html, expression, labelText: null);
+            return ShowLabelFor(html, expression, labelText: null, isrequired: false);
         }
 
-        public static HtmlString ShowLabelFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, string labelText)
+        public static HtmlString ShowLabelFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, bool isrequired)
+        {
+            return ShowLabelFor(html, expression, labelText: null, isrequired);
+        }
+
+        public static HtmlString ShowLabelFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, string labelText, bool isrequired)
         {
             var metadata = ModelMetadata.FromLambdaExpression(expression, html.ViewData);
             var propertyName = metadata.PropertyName.ToLower();
 
-            return html.LabelFor(expression, labelText, new
+            if (isrequired)
             {
-                id = $"{propertyName}-label"
-            });
+                return html.LabelFor(expression, labelText, new
+                {
+                    id = $"{propertyName}-label",
+                    @class = "required"
+                });
+            }
+            else
+            {
+                return html.LabelFor(expression, labelText, new
+                {
+                    id = $"{propertyName}-label"
+                });
+            }
         }
 
         public static HtmlString ShowPasswordFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression)
         {
             var htmlAttributes = GetHtmlAttributes(html, expression);
+            htmlAttributes["autocomplete"] = "off";
+            return html.PasswordFor(expression, htmlAttributes);
+        }
+
+        public static HtmlString ShowPasswordFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, string customClass)
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression, customClass: customClass);
             htmlAttributes["autocomplete"] = "off";
             return html.PasswordFor(expression, htmlAttributes);
         }
@@ -143,36 +162,45 @@ namespace NuGetGallery
             return html.TextBoxFor(expression, htmlAttributes);
         }
 
-        public static HtmlString ShowEmailBoxFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression)
+        public static HtmlString ShowTextBoxFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, string customClass, bool enabled = true, string placeholder = null)
         {
-            var htmlAttributes = GetHtmlAttributes(html, expression);
+            var htmlAttributes = GetHtmlAttributes(html, expression, customClass: customClass);
+            if (!enabled)
+            {
+                htmlAttributes.Add("disabled", "true");
+            }
+
+            if (placeholder != null)
+            {
+                htmlAttributes.Add("placeholder", placeholder);
+            }
+
+            return html.TextBoxFor(expression, htmlAttributes);
+        }
+
+        public static HtmlString ShowEmailBoxFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, string customClass = "")
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression, customClass: customClass);
             htmlAttributes["type"] = "email";
             return html.TextBoxFor(expression, htmlAttributes);
         }
 
-        public static HtmlString ShowCheckboxFor<TModel>(this HtmlHelper<TModel> html, Expression<Func<TModel, bool>> expression)
+        public static HtmlString ShowCheckboxFor<TModel>(this HtmlHelper<TModel> html, Expression<Func<TModel, bool>> expression, string customClass = "")
         {
-            var htmlAttributes = GetHtmlAttributes(html, expression, isFormControl: false, isCheckbox: true);
+            var htmlAttributes = GetHtmlAttributes(html, expression, isFormControl: false, isCheckbox: true, customClass);
             return html.CheckBoxFor(expression, htmlAttributes);
         }
-
+        
         public static HtmlString ShowTextAreaFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, int rows, int columns)
         {
             var htmlAttributes = GetHtmlAttributes(html, expression);
             return html.TextAreaFor(expression, rows, columns, htmlAttributes);
         }
 
-        public static MvcHtmlString ShowEnumDropDownListFor<TModel, TEnum>(
-            this HtmlHelper<TModel> html,
-            Expression<Func<TModel, TEnum?>> expression,
-            string emptyItemText)
-          where TEnum : struct
+        public static HtmlString ShowTextAreaFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, int rows, int columns, string customClass = "")
         {
-            var values = Enum
-                .GetValues(typeof(TEnum))
-                .Cast<TEnum>();
-
-            return ShowEnumDropDownListFor<TModel, TEnum>(html, expression, values, emptyItemText);
+            var htmlAttributes = GetHtmlAttributes(html, expression, customClass: customClass);
+            return html.TextAreaFor(expression, rows, columns, htmlAttributes);
         }
 
         public static MvcHtmlString ShowEnumDropDownListFor<TModel, TEnum>(
@@ -186,11 +214,38 @@ namespace NuGetGallery
             return html.EnumDropDownListFor(expression, values, emptyItemText, htmlAttributes);
         }
 
+        public static MvcHtmlString ShowEnumDropDownListFor<TModel, TEnum>(
+            this HtmlHelper<TModel> html,
+            Expression<Func<TModel, TEnum?>> expression,
+            string emptyItemText,
+            string customClass = "")
+          where TEnum : struct
+        {
+            var values = Enum
+                .GetValues(typeof(TEnum))
+                .Cast<TEnum>();
+
+            return ShowEnumDropDownListFor<TModel, TEnum>(html, expression, values, emptyItemText, customClass);
+        }
+
+        public static MvcHtmlString ShowEnumDropDownListFor<TModel, TEnum>(
+            this HtmlHelper<TModel> html,
+            Expression<Func<TModel, TEnum?>> expression,
+            IEnumerable<TEnum> values,
+            string emptyItemText,
+            string customClass = "")
+          where TEnum : struct
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression, customClass: customClass);
+            return html.EnumDropDownListFor(expression, values, emptyItemText, htmlAttributes);
+        }
+
         private static Dictionary<string, object> GetHtmlAttributes<TModel, TProperty>(
             HtmlHelper<TModel> html,
             Expression<Func<TModel, TProperty>> expression,
             bool isFormControl = true,
-            bool isCheckbox = false)
+            bool isCheckbox = false,
+            string customClass = "")
         {
             var metadata = ModelMetadata.FromLambdaExpression(expression, html.ViewData);
             var propertyName = metadata.PropertyName.ToLower();
@@ -200,7 +255,11 @@ namespace NuGetGallery
 
             if (isFormControl)
             {
-                htmlAttributes["class"] = "form-control";
+                htmlAttributes["class"] = $"form-control {customClass}";
+            }
+            else if (!string.IsNullOrEmpty(customClass))
+            {
+                htmlAttributes["class"] = $"{customClass}";
             }
 
             // If the property is required, mark it as required unless it's a checkbox.
@@ -243,6 +302,15 @@ namespace NuGetGallery
                 throw new ArgumentNullException(nameof(frameworkName));
             }
 
+            // Defer to the NuGet client logic for displaying .NET 5 frameworks. This aligns with Visual Studio package
+            // management UI.
+            var isNet5Era = frameworkName.Version.Major >= 5
+                && StringComparer.OrdinalIgnoreCase.Equals(FrameworkConstants.FrameworkIdentifiers.NetCoreApp, frameworkName.Framework);
+            if (isNet5Era)
+            {
+                return frameworkName.ToString();
+            }
+
             var sb = new StringBuilder();
             if (String.Equals(frameworkName.Framework, ".NETPortable", StringComparison.OrdinalIgnoreCase))
             {
@@ -262,7 +330,7 @@ namespace NuGetGallery
                     sb.Append(String.Join(", ",
                         profiles.Select(s => NuGetFramework.Parse(s).ToFriendlyName(allowRecurseProfile: false))));
 
-                    sb.Append(")");
+                    sb.Append(')');
                 }
             }
             else

@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Entity;
 using System.Linq;
+using System.Threading.Tasks;
 using NuGet.Services.Entities;
 using NuGet.Services.Validation;
 using NuGet.Versioning;
@@ -20,17 +21,20 @@ namespace NuGetGallery.Areas.Admin.Services
         private readonly IEntityRepository<PackageValidation> _validations;
         private readonly IEntityRepository<Package> _packages;
         private readonly IEntityRepository<SymbolPackage> _symbolPackages;
+        private readonly IValidationService _validationService;
 
         public ValidationAdminService(
             IEntityRepository<PackageValidationSet> validationSets,
             IEntityRepository<PackageValidation> validations,
             IEntityRepository<Package> packages,
-            IEntityRepository<SymbolPackage> symbolPackages)
+            IEntityRepository<SymbolPackage> symbolPackages,
+            IValidationService validationService)
         {
             _validationSets = validationSets ?? throw new ArgumentNullException(nameof(validationSets));
             _validations = validations ?? throw new ArgumentNullException(nameof(validations));
             _packages = packages ?? throw new ArgumentNullException(nameof(packages));
             _symbolPackages = symbolPackages ?? throw new ArgumentNullException(nameof(symbolPackages));
+            _validationService = validationService ?? throw new ArgumentNullException(nameof(validationService));
         }
 
         /// <summary>
@@ -67,18 +71,59 @@ namespace NuGetGallery.Areas.Admin.Services
             var pendingPackages = _packages
                 .GetAll()
                 .Where(p => p.PackageStatusKey == PackageStatus.Validating)
-                .Select(p => p.Key)
+                .Select(p => (int?)p.Key)
                 .ToList();
             var pendingSymbolPackages = _symbolPackages
                 .GetAll()
                 .Where(s => s.StatusKey == PackageStatus.Validating)
-                .Select(s => s.Key)
+                .Select(s => (int?)s.Key)
                 .ToList();
 
+            // TODO: Add generic validation sets.
+            // Tracked by: https://github.com/NuGet/Engineering/issues/3587
             AddPendingValidationSets(pendingValidations, pendingPackages, ValidatingType.Package);
             AddPendingValidationSets(pendingValidations, pendingSymbolPackages, ValidatingType.SymbolPackage);
 
             return pendingValidations;
+        }
+
+        public async Task<int> RevalidatePendingAsync(ValidatingType validatingType)
+        {
+            if (validatingType == ValidatingType.Package)
+            {
+                var pendingPackages = _packages
+                    .GetAll()
+                    .Include(p => p.PackageRegistration)
+                    .Where(p => p.PackageStatusKey == PackageStatus.Validating)
+                    .ToList();
+
+                foreach (var package in pendingPackages)
+                {
+                    await _validationService.RevalidateAsync(package);
+                }
+
+                return pendingPackages.Count;
+            }
+            else if (validatingType == ValidatingType.SymbolPackage)
+            {
+                var pendingSymbolPackages = _symbolPackages
+                    .GetAll()
+                    .Include(p => p.Package)
+                    .Include(p => p.Package.PackageRegistration)
+                    .Where(s => s.StatusKey == PackageStatus.Validating)
+                    .ToList();
+
+                foreach (var symbolPackage in pendingSymbolPackages)
+                {
+                    await _validationService.RevalidateAsync(symbolPackage);
+                }
+
+                return pendingSymbolPackages.Count;
+            }
+            else
+            {
+                throw new NotSupportedException("The validating type " + validatingType + " is not supported.");
+            }
         }
 
         public PackageDeletedStatus GetDeletedStatus(int key, ValidatingType validatingType)
@@ -103,8 +148,7 @@ namespace NuGetGallery.Areas.Admin.Services
         {
             var package = _packages
                 .GetAll()
-                .Where(x => x.Key == packageKey)
-                .FirstOrDefault();
+                .FirstOrDefault(x => x.Key == packageKey);
 
             if (package == null)
             {
@@ -122,8 +166,7 @@ namespace NuGetGallery.Areas.Admin.Services
         {
             var symbolPackage = _symbolPackages
                 .GetAll()
-                .Where(x => x.Key == symbolPackageKey)
-                .FirstOrDefault();
+                .FirstOrDefault(x => x.Key == symbolPackageKey);
 
             if (symbolPackage == null)
             {
@@ -144,8 +187,7 @@ namespace NuGetGallery.Areas.Admin.Services
                 var validationSet = _validationSets
                     .GetAll()
                     .Include(x => x.PackageValidations)
-                    .Where(x => x.ValidationTrackingId == guid)
-                    .FirstOrDefault();
+                    .FirstOrDefault(x => x.ValidationTrackingId == guid);
 
                 if (validationSet != null)
                 {
@@ -161,8 +203,7 @@ namespace NuGetGallery.Areas.Admin.Services
                 var validation = _validations
                     .GetAll()
                     .Include(x => x.PackageValidationSet)
-                    .Where(x => x.Key == guid)
-                    .FirstOrDefault();
+                    .FirstOrDefault(x => x.Key == guid);
 
                 if (validation != null)
                 {
@@ -178,8 +219,7 @@ namespace NuGetGallery.Areas.Admin.Services
                 var validationSet = _validationSets
                     .GetAll()
                     .Include(x => x.PackageValidations)
-                    .Where(x => x.Key == integer)
-                    .FirstOrDefault();
+                    .FirstOrDefault(x => x.Key == integer);
 
                 if (validationSet != null)
                 {
@@ -228,7 +268,7 @@ namespace NuGetGallery.Areas.Admin.Services
 
         private void AddPendingValidationSets(
             List<PackageValidationSet> validationSets,
-            IReadOnlyList<int> packageKeys,
+            IReadOnlyList<int?> packageKeys,
             ValidatingType type)
         {
             foreach (var packageKeyBatch in Batch(packageKeys, PendingValidationsBatchSize))
@@ -237,7 +277,7 @@ namespace NuGetGallery.Areas.Admin.Services
                     _validationSets
                         .GetAll()
                         .Where(v => v.ValidatingType == type)
-                        .Where(v => packageKeys.Contains(v.PackageKey)));
+                        .Where(v => packageKeyBatch.Contains(v.PackageKey)));
             }
         }
 

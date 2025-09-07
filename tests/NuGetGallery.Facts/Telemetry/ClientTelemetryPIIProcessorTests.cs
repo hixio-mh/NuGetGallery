@@ -1,8 +1,7 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web.Routing;
@@ -24,7 +23,7 @@ namespace NuGetGallery.Telemetry
             {
                 _currentRoutes = new RouteCollection();
                 Routes.RegisterApiV2Routes(_currentRoutes);
-                Routes.RegisterUIRoutes(_currentRoutes);
+                Routes.RegisterUIRoutes(_currentRoutes, adminPanelEnabled: true);
             }
         }
 
@@ -241,7 +240,7 @@ namespace NuGetGallery.Telemetry
             var piiRoutes = _currentRoutes.Where((r) =>
             {
                 Route webRoute = r as Route;
-                return webRoute != null ? IsPIIUrl(webRoute.Url.ToString()) : false;
+                return webRoute != null ? IsPIIUrl(webRoute.Url) : false;
             }).Select((r) =>
             {
                 var dd = ((Route)r).Defaults;
@@ -256,7 +255,7 @@ namespace NuGetGallery.Telemetry
             var piiRoutes = _currentRoutes.Where((r) =>
             {
                 Route webRoute = r as Route;
-                return webRoute != null ? IsPIIUrl(webRoute.Url.ToString()) : false;
+                return webRoute != null ? IsPIIUrl(webRoute.Url) : false;
             }).Select((r) => ((Route)r).Url).Distinct().ToList();
 
             return piiRoutes;
@@ -264,9 +263,14 @@ namespace NuGetGallery.Telemetry
 
         private static bool IsPIIUrl(string url)
         {
-            return url.ToLower().Contains("username")
+            var hasPIIParameter = url.ToLower().Contains("username")
                 || url.ToLower().Contains("accountname")
                 || url.ToLower().Contains("token");
+
+            var uri = new Uri(new Uri("https://localhost"), url);
+            var isExcluded = uri.AbsolutePath == "/api/v2/token";
+
+            return hasPIIParameter && !isExcluded;
         }
 
         public static IEnumerable<object[]> PIIUrlDataGenerator()
@@ -305,7 +309,7 @@ namespace NuGetGallery.Telemetry
                 yield return new string[] { "profiles/{accountName}/avatar", $"https://localhost/profiles/{user}/avatar", "https://localhost/profiles/ObfuscatedUserName/avatar" };
             }
 
-            yield return new string[] { "account/transform/cancel/{token}", $"https://localhost/account/transform/cancel/sometoken", "https://localhost/account/transform/cancel/ObfuscatedToken" };
+            yield return new string[] { "account/transform/cancel/{token}", "https://localhost/account/transform/cancel/sometoken", "https://localhost/account/transform/cancel/ObfuscatedToken" };
         }
 
         public static List<string> GenerateUserNames()

@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -8,6 +8,8 @@ using NuGet.Services.Entities;
 using NuGet.Services.Licenses;
 using NuGet.Services.Validation.Issues;
 using NuGet.Versioning;
+using NuGetGallery.Frameworks;
+using NuGetGallery.Services.Models;
 
 namespace NuGetGallery
 {
@@ -22,23 +24,37 @@ namespace NuGetGallery
         public string Copyright { get; set; }
         public string ReadMeHtml { get; set; }
         public bool ReadMeImagesRewritten { get; set; }
+        public bool ReadmeImageSourceDisallowed { get; set; }
         public DateTime? LastEdited { get; set; }
-        public int DownloadsPerDay { get; set; }
+        public long DownloadsPerDay { get; set; }
         public int TotalDaysSinceCreated { get; set; }
         public long PackageFileSize { get; set; }
         public SymbolPackage LatestSymbolsPackage { get; set; }
         public SymbolPackage LatestAvailableSymbolsPackage { get; set; }
 
         public bool IsDotnetToolPackageType { get; set; }
+        public bool IsMcpServerPackageType { get; set; }
         public bool IsDotnetNewTemplatePackageType { get; set; }
+        public bool IsMSBuildSdkPackageType { get; set; }
         public bool IsAtomFeedEnabled { get; set; }
         public bool IsPackageDeprecationEnabled { get; set; }
+        public bool IsPackageVulnerabilitiesEnabled { get; set; }
+        public bool IsFuGetLinksEnabled { get; set; }
+        public bool IsNuGetTrendsLinksEnabled { get; set; }
+        public bool IsNuGetPackageExplorerLinkEnabled { get; set; }
         public bool IsPackageRenamesEnabled { get; set; }
         public bool IsGitHubUsageEnabled { get; set; }
         public bool IsPackageDependentsEnabled { get; set; }
-        public NuGetPackageGitHubInformation GitHubDependenciesInformation { get; set; }
+        public bool IsRecentPackagesNoIndexEnabled { get; set; }
+        public bool IsMarkdigMdSyntaxHighlightEnabled { get; set; }
+        public bool CanDisplayReadmeWarning { get; set; }
+        public GitHubUsageViewModel GitHubDependenciesInformation { get; set; }
         public bool HasEmbeddedIcon { get; set; }
+        public bool HasEmbeddedReadmeFile { get; set; }
         public PackageDependents PackageDependents { get; set; }
+        public McpServerEntryTemplateResult VsCodeMcpServerEntryTemplate { get; set; }
+
+        public const int NumberOfDaysToBlockIndexing = 90;
 
         public bool HasNewerPrerelease
         {
@@ -75,18 +91,31 @@ namespace NuGetGallery
         public RepositoryKind RepositoryType { get; private set; }
         public string ProjectUrl { get; set; }
         public string LicenseUrl { get; set; }
+        public string FuGetUrl { get; set; }
+        public string NuGetTrendsUrl { get; set; }
+        public string NuGetPackageExplorerUrl { get; set; }
         public IReadOnlyCollection<string> LicenseNames { get; set; }
         public string LicenseExpression { get; set; }
         public IReadOnlyCollection<CompositeLicenseExpressionSegment> LicenseExpressionSegments { get; set; }
         public EmbeddedLicenseFileType EmbeddedLicenseType { get; set; }
 
         public PackageDeprecationStatus DeprecationStatus { get; set; }
+        public IReadOnlyCollection<PackageVulnerability> Vulnerabilities { get; set; }
+        public PackageVulnerabilitySeverity MaxVulnerabilitySeverity { get; set; }
+        public string PackageWarningIconTitle { get; set; }
         public string AlternatePackageId { get; set; }
         public string AlternatePackageVersion { get; set; }
         public string CustomMessage { get; set; }
 
         public IReadOnlyCollection<PackageRename> PackageRenames { get; set; }
         public string RenamedMessage { get; set; }
+        public bool IsDisplayTargetFrameworkEnabled { get; set; }
+        public bool IsComputeTargetFrameworkEnabled { get; set; }
+        public PackageFrameworkCompatibility PackageFrameworkCompatibility { get; set; }
+
+        public string ComparableGitHubRepository { get; private set; }
+
+        public bool IsMcpServerPackageDisplayEnabled { get; set; }
 
         public void InitializeRepositoryMetadata(string repositoryUrl, string repositoryType)
         {
@@ -113,6 +142,73 @@ namespace NuGetGallery
                 {
                     RepositoryType = RepositoryKind.Git;
                 }
+            }
+        }
+
+        public void InitializeComparableGitHubRepository()
+        {
+            const string githubCom = "github.com/";
+            string comparableUrl = string.Empty;
+
+            if (RepositoryUrl != null && RepositoryUrl.Contains(githubCom))
+            {
+                comparableUrl = RepositoryUrl;
+            }
+            else if (ProjectUrl != null && ProjectUrl.Contains(githubCom))
+            {
+                comparableUrl = ProjectUrl;
+            }
+
+            comparableUrl = comparableUrl.ToLowerInvariant();
+            comparableUrl = comparableUrl.EndsWith("/") ? comparableUrl.Substring(0, comparableUrl.Length - 1) : comparableUrl;
+            comparableUrl = comparableUrl.EndsWith(".git") ? comparableUrl.Substring(0, comparableUrl.Length - ".git".Length) : comparableUrl;
+
+            if (comparableUrl.StartsWith("git://"))
+            {
+                comparableUrl = comparableUrl.Replace($"git://{githubCom}", "");
+            }
+            else if (comparableUrl.StartsWith("https://"))
+            {
+                comparableUrl = comparableUrl.Replace($"https://{githubCom}", "");
+            }
+
+            ComparableGitHubRepository = comparableUrl;
+        }
+
+        public bool CanDisplayNuGetPackageExplorerLink()
+        {
+            return IsNuGetPackageExplorerLinkEnabled && !string.IsNullOrEmpty(NuGetPackageExplorerUrl) && Available;
+        }
+
+        public bool CanDisplayFuGetLink()
+        {
+            return IsFuGetLinksEnabled && !string.IsNullOrEmpty(FuGetUrl) && Available;
+        }
+
+        public bool CanDisplayNuGetTrendsLink()
+        {
+            return IsNuGetTrendsLinksEnabled && !string.IsNullOrEmpty(NuGetTrendsUrl) && Available;
+        }
+
+        public bool CanDisplayTargetFrameworks()
+        {
+            return IsDisplayTargetFrameworkEnabled && !Deleted && !IsDotnetNewTemplatePackageType;
+        }
+
+        public bool CanDisplayMcpServerPackageTab()
+        {
+            return
+                IsDotnetToolPackageType &&
+                IsMcpServerPackageType &&
+                IsMcpServerPackageDisplayEnabled &&
+                VsCodeMcpServerEntryTemplate != null;
+        }
+
+        public bool BlockSearchEngineIndexing
+        {
+            get
+            {
+                return !Listed || !Available || (IsRecentPackagesNoIndexEnabled && TotalDaysSinceCreated < NumberOfDaysToBlockIndexing);
             }
         }
 

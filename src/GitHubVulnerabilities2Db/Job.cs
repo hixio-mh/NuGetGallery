@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -6,33 +6,40 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Autofac;
-using GitHubVulnerabilities2Db.Collector;
+using Azure.Identity;
+using Azure.Storage.Blobs;
 using GitHubVulnerabilities2Db.Configuration;
+using GitHubVulnerabilities2Db.Fakes;
 using GitHubVulnerabilities2Db.Gallery;
-using GitHubVulnerabilities2Db.GraphQL;
-using GitHubVulnerabilities2Db.Ingest;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.WindowsAzure.Storage;
 using NuGet.Jobs;
 using NuGet.Jobs.Configuration;
 using NuGet.Services.Cursor;
+using NuGet.Services.GitHub.Collector;
+using NuGet.Services.GitHub.Configuration;
+using NuGet.Services.GitHub.GraphQL;
+using NuGet.Services.GitHub.Ingest;
 using NuGet.Services.Storage;
 using NuGetGallery;
 using NuGetGallery.Auditing;
+using NuGetGallery.Configuration;
 using NuGetGallery.Security;
 
 namespace GitHubVulnerabilities2Db
 {
     public class Job : JsonConfigurationJob, IDisposable
     {
+        private const string ManagedIdentityClientIdKey = "UserManagedIdentityClientId";
         private readonly HttpClient _client = new HttpClient();
 
         public override async Task Run()
         {
             var collector = _serviceProvider.GetRequiredService<IAdvisoryCollector>();
             while (await collector.ProcessAsync(CancellationToken.None)) ;
+
         }
 
         protected override void ConfigureJobServices(IServiceCollection services, IConfigurationRoot configurationRoot)
@@ -45,14 +52,16 @@ namespace GitHubVulnerabilities2Db
             _client.Dispose();
         }
 
-        protected override void ConfigureAutofacServices(ContainerBuilder containerBuilder)
+        protected override void ConfigureAutofacServices(ContainerBuilder containerBuilder, IConfigurationRoot configurationRoot)
         {
             containerBuilder
                 .RegisterAdapter<IOptionsSnapshot<GitHubVulnerabilities2DbConfiguration>, GitHubVulnerabilities2DbConfiguration>(c => c.Value);
+            containerBuilder
+                .RegisterAdapter<IOptionsSnapshot<GitHubVulnerabilities2DbConfiguration>, GraphQLQueryConfiguration>(c => c.Value);
 
             ConfigureQueryServices(containerBuilder);
             ConfigureIngestionServices(containerBuilder);
-            ConfigureCollectorServices(containerBuilder);
+            ConfigureCollectorServices(containerBuilder, configurationRoot);
         }
 
         protected void ConfigureIngestionServices(ContainerBuilder containerBuilder)
@@ -60,8 +69,12 @@ namespace GitHubVulnerabilities2Db
             ConfigureGalleryServices(containerBuilder);
 
             containerBuilder
-                .RegisterType<PackageVulnerabilityService>()
-                .As<IPackageVulnerabilityService>();
+                .RegisterType<PackageVulnerabilitiesManagementService>()
+                .As<IPackageVulnerabilitiesManagementService>();
+
+            containerBuilder
+                .RegisterType<GalleryDbVulnerabilityWriter>()
+                .As<IVulnerabilityWriter>();
 
             containerBuilder
                 .RegisterType<GitHubVersionRangeParser>()
@@ -99,6 +112,10 @@ namespace GitHubVulnerabilities2Db
                 .As<ISecurityPolicyService>();
 
             containerBuilder
+                .RegisterType<FakeFeatureFlagService>()
+                .As<IFeatureFlagService>();
+
+            containerBuilder
                 .RegisterType<PackageService>()
                 .As<IPackageService>();
 
@@ -109,13 +126,27 @@ namespace GitHubVulnerabilities2Db
             containerBuilder
                 .RegisterType<PackageUpdateService>()
                 .As<IPackageUpdateService>();
+
+            containerBuilder.RegisterType<AppConfiguration>()
+                .As<IAppConfiguration>()
+                .SingleInstance();
+
+            var contentService = new FakeContentService();
+            containerBuilder.RegisterInstance(contentService)
+                .As<IContentService>()
+                .SingleInstance();
+
+            containerBuilder.RegisterType<ContentObjectService>()
+                .As<IContentObjectService>()
+                .SingleInstance();
         }
 
         protected void ConfigureQueryServices(ContainerBuilder containerBuilder)
         {
             containerBuilder
                 .RegisterInstance(_client)
-                .As<HttpClient>();
+                .As<HttpClient>()
+                .ExternallyOwned(); // We don't want autofac disposing this--see https://github.com/NuGet/NuGetGallery/issues/9194
 
             containerBuilder
                 .RegisterType<QueryService>()
@@ -130,21 +161,26 @@ namespace GitHubVulnerabilities2Db
                 .As<IAdvisoryQueryService>();
         }
 
-        protected void ConfigureCollectorServices(ContainerBuilder containerBuilder)
+        protected void ConfigureCollectorServices(ContainerBuilder containerBuilder, IConfigurationRoot configurationRoot)
         {
             containerBuilder
                 .Register(ctx =>
                 {
                     var config = ctx.Resolve<GitHubVulnerabilities2DbConfiguration>();
-                    return CloudStorageAccount.Parse(config.StorageConnectionString);
+                    var credential = new ManagedIdentityCredential(configurationRoot[ManagedIdentityClientIdKey]);
+                    return new BlobServiceClientFactory(new Uri(config.StorageConnectionString), credential);
                 })
-                .As<CloudStorageAccount>();
+                .As<BlobServiceClientFactory>();
 
             containerBuilder
-                .RegisterType<AzureStorageFactory>()
-                .WithParameter(
-                    (parameter, ctx) => parameter.Name == "containerName",
-                    (parameter, ctx) => ctx.Resolve<GitHubVulnerabilities2DbConfiguration>().CursorContainerName)
+                .Register(ctx =>
+                {
+                    return new AzureStorageFactory(
+                        ctx.Resolve<BlobServiceClientFactory>(),
+                        ctx.Resolve<GitHubVulnerabilities2DbConfiguration>().CursorContainerName,
+                        enablePublicAccess: true,
+                        ctx.Resolve<ILogger<AzureStorage>>());
+                })
                 .As<StorageFactory>()
                 .As<IStorageFactory>();
 

@@ -1,12 +1,14 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using NuGet.Services.Entities;
 using NuGet.Versioning;
+using NuGetGallery.Auditing;
 using NuGetGallery.Framework;
 using Xunit;
 
@@ -23,7 +25,7 @@ namespace NuGetGallery
                 var id = "Crested.Gecko";
                 GetMock<IPackageService>()
                     .Setup(x => x.FindPackagesById(id, PackageDeprecationFieldsToInclude.None))
-                    .Returns(new Package[0]);
+                    .Returns(Array.Empty<Package>());
 
                 var controller = GetService<PackageDeprecationManagementService>();
 
@@ -134,7 +136,7 @@ namespace NuGetGallery
             }
 
             public static IEnumerable<object[]> ReturnsBadRequestIfNoVersions_Data =
-                MemberDataHelper.AsDataSet(null, new string[0]);
+                MemberDataHelper.AsDataSet(null, Array.Empty<string>());
 
             [Theory]
             [MemberData(nameof(ReturnsBadRequestIfNoVersions_Data))]
@@ -184,8 +186,7 @@ namespace NuGetGallery
                 get
                 {
                     var packageWithNullRegistration = new Package();
-                    return MemberDataHelper.AsDataSet(
-                        new Package[0],
+                    return MemberDataHelper.AsDataSet(Array.Empty<Package>(),
                         new[] { packageWithNullRegistration });
                 }
             }
@@ -413,7 +414,7 @@ namespace NuGetGallery
 
             [Theory]
             [MemberData(nameof(Owner_Data))]
-            public async Task ReturnsNotFoundIfAlternatePackageRegistrationMissing(User currentUser, User owner)
+            public async Task ReturnsBadRequestIfAlternatePackageRegistrationMissing(User currentUser, User owner)
             {
                 // Arrange
                 var id = "id";
@@ -459,7 +460,7 @@ namespace NuGetGallery
                     alternatePackageId: alternatePackageId);
 
                 // Assert
-                Assert.Equal(HttpStatusCode.NotFound, result.Status);
+                Assert.Equal(HttpStatusCode.BadRequest, result.Status);
                 Assert.Equal(string.Format(Strings.DeprecatePackage_NoAlternatePackageRegistration, alternatePackageId), result.Message);
 
                 featureFlagService.Verify();
@@ -468,7 +469,7 @@ namespace NuGetGallery
 
             [Theory]
             [MemberData(nameof(Owner_Data))]
-            public async Task ReturnsNotFoundIfAlternatePackageVersionMissing(User currentUser, User owner)
+            public async Task ReturnsBadRequestIfAlternatePackageVersionMissing(User currentUser, User owner)
             {
                 // Arrange
                 var id = "id";
@@ -516,7 +517,7 @@ namespace NuGetGallery
                     alternatePackageVersion: alternatePackageVersion);
 
                 // Assert
-                Assert.Equal(HttpStatusCode.NotFound, result.Status);
+                Assert.Equal(HttpStatusCode.BadRequest, result.Status);
                 Assert.Equal(string.Format(Strings.DeprecatePackage_NoAlternatePackage, alternatePackageId, alternatePackageVersion), result.Message);
 
                 featureFlagService.Verify();
@@ -855,7 +856,7 @@ namespace NuGetGallery
 
                 var package2 = new Package
                 {
-                    NormalizedVersion = "1.0.0",
+                    NormalizedVersion = "1.0.0-RC1",
                     PackageRegistration = registration
                 };
 
@@ -923,13 +924,15 @@ namespace NuGetGallery
                         alternatePackageRegistration,
                         alternatePackage,
                         customMessage,
-                        currentUser))
+                        currentUser,
+                        ListedVerb.Unchanged,
+                        PackageDeprecatedVia.Web))
                     .Completes()
                     .Verifiable();
 
                 var service = GetService<PackageDeprecationManagementService>();
 
-                var packageNormalizedVersions = new[] { package.NormalizedVersion, package2.NormalizedVersion };
+                var packageNormalizedVersions = new[] { package.NormalizedVersion, package2.NormalizedVersion.ToLowerInvariant() };
 
                 // Act
                 var result = await InvokeUpdateDeprecation(
@@ -968,6 +971,7 @@ namespace NuGetGallery
                     currentUser,
                     id,
                     versions,
+                    PackageDeprecatedVia.Web,
                     isLegacy,
                     hasCriticalBugs,
                     isOther,

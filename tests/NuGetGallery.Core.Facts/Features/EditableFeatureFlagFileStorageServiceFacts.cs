@@ -5,16 +5,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Microsoft.WindowsAzure.Storage;
 using Moq;
 using Newtonsoft.Json;
 using NuGet.Services.Entities;
 using NuGet.Services.FeatureFlags;
 using NuGetGallery.Auditing;
+using NuGetGallery.Shared;
 using Xunit;
 
 namespace NuGetGallery.Features
@@ -144,7 +143,7 @@ namespace NuGetGallery.Features
                 var result = await _target.TrySaveAsync(Example, contentId);
 
                 // Assert - the saved JSON should be formatted
-                Assert.Equal(FeatureFlagSaveResult.Ok, result);
+                Assert.Equal(ContentSaveResult.Ok, result);
 
                 _storage.Verify(
                     s => s.SaveFileAsync(
@@ -159,7 +158,7 @@ namespace NuGetGallery.Features
                         It.Is<FeatureFlagsAuditRecord>(
                             r => r.Action == AuditedFeatureFlagsAction.Update
                                 && r.ContentId == contentId
-                                && r.Result == FeatureFlagSaveResult.Ok
+                                && r.Result == ContentSaveResult.Ok
                                 && r.Features.SingleOrDefault(
                                     f => f.Name == "NuGetGallery.Typosquatting"
                                         && f.Status == FeatureStatus.Enabled) != null
@@ -195,7 +194,7 @@ namespace NuGetGallery.Features
                 var result = await _target.TrySaveAsync(Example, contentId);
 
                 // Assert - the saved JSON should be formatted
-                Assert.Equal(FeatureFlagSaveResult.Ok, result);
+                Assert.Equal(ContentSaveResult.Ok, result);
                 Assert.Equal(ExampleJson, json);
 
                 _storage.Verify(
@@ -211,7 +210,7 @@ namespace NuGetGallery.Features
                         It.Is<FeatureFlagsAuditRecord>(
                             r => r.Action == AuditedFeatureFlagsAction.Update
                                 && r.ContentId == contentId
-                                && r.Result == FeatureFlagSaveResult.Ok
+                                && r.Result == ContentSaveResult.Ok
                                 && r.Features.SingleOrDefault(
                                     f => f.Name == "NuGetGallery.Typosquatting"
                                         && f.Status == FeatureStatus.Enabled) != null
@@ -242,7 +241,7 @@ namespace NuGetGallery.Features
                 var result = await _target.TrySaveAsync(Example, contentId);
 
                 // Assert
-                Assert.Equal(FeatureFlagSaveResult.Conflict, result);
+                Assert.Equal(ContentSaveResult.Conflict, result);
 
                 _storage.Verify(
                     s => s.SaveFileAsync(
@@ -257,7 +256,7 @@ namespace NuGetGallery.Features
                         It.Is<FeatureFlagsAuditRecord>(
                             r => r.Action == AuditedFeatureFlagsAction.Update
                                 && r.ContentId == contentId
-                                && r.Result == FeatureFlagSaveResult.Conflict
+                                && r.Result == ContentSaveResult.Conflict
                                 && r.Features.SingleOrDefault(
                                     f => f.Name == "NuGetGallery.Typosquatting"
                                         && f.Status == FeatureStatus.Enabled) != null
@@ -386,7 +385,7 @@ namespace NuGetGallery.Features
                         It.Is<FeatureFlagsAuditRecord>(
                             r => r.Action == AuditedFeatureFlagsAction.Update
                                 && r.ContentId == "fake-content-id"
-                                && r.Result == FeatureFlagSaveResult.Ok
+                                && r.Result == ContentSaveResult.Ok
                                 && !r.Features.Any()
                                 && r.Flights.SingleOrDefault(
                                     f => f.Name == "A"
@@ -466,7 +465,7 @@ namespace NuGetGallery.Features
                         It.Is<FeatureFlagsAuditRecord>(
                             r => r.Action == AuditedFeatureFlagsAction.Update
                                 && r.ContentId == "fake-content-id"
-                                && r.Result == FeatureFlagSaveResult.Conflict
+                                && r.Result == ContentSaveResult.Conflict
                                 && !r.Features.Any()
                                 && r.Flights.SingleOrDefault(
                                     f => f.Name == "A"
@@ -481,7 +480,7 @@ namespace NuGetGallery.Features
                         It.Is<FeatureFlagsAuditRecord>(
                             r => r.Action == AuditedFeatureFlagsAction.Update
                                 && r.ContentId == "fake-content-id"
-                                && r.Result == FeatureFlagSaveResult.Ok
+                                && r.Result == ContentSaveResult.Ok
                                 && !r.Features.Any()
                                 && r.Flights.SingleOrDefault(
                                     f => f.Name == "A"
@@ -531,7 +530,7 @@ namespace NuGetGallery.Features
                         It.Is<FeatureFlagsAuditRecord>(
                             r => r.Action == AuditedFeatureFlagsAction.Update
                                 && r.ContentId == "fake-content-id"
-                                && r.Result == FeatureFlagSaveResult.Conflict
+                                && r.Result == ContentSaveResult.Conflict
                                 && !r.Features.Any() 
                                 && r.Flights.SingleOrDefault(
                                     f => f.Name == "A" 
@@ -620,7 +619,7 @@ namespace NuGetGallery.Features
             protected readonly Mock<ICoreFileStorageService> _storage;
             protected readonly Mock<IAuditingService> _auditing;
             protected readonly EditableFeatureFlagFileStorageService _target;
-            protected readonly StorageException _preconditionException;
+            protected readonly CloudBlobPreconditionFailedException _preconditionException;
 
             public FactsBase()
             {
@@ -631,13 +630,7 @@ namespace NuGetGallery.Features
                 _target = new EditableFeatureFlagFileStorageService(
                     _storage.Object, _auditing.Object, logger);
 
-                _preconditionException = new StorageException(
-                    new RequestResult
-                    {
-                        HttpStatusCode = (int)HttpStatusCode.PreconditionFailed
-                    },
-                    "Precondition failed",
-                    new Exception());
+                _preconditionException = new CloudBlobPreconditionFailedException(new Exception());
             }
 
             protected Stream BuildStream(string content)

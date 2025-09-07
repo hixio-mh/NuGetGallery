@@ -4,7 +4,6 @@
 using System;
 using System.Data.Common;
 using System.Data.Entity;
-using System.Linq;
 using NuGet.Services.Entities;
 
 namespace NuGetGallery
@@ -30,6 +29,8 @@ namespace NuGetGallery
             }
         }
 
+        public string QueryHint => _entitiesContext.QueryHint;
+
         DbSet<T> IReadOnlyEntitiesContext.Set<T>()
         {
             return _entitiesContext.Set<T>();
@@ -44,5 +45,7 @@ namespace NuGetGallery
         {
             _entitiesContext.Dispose();
         }
+
+        public IDisposable WithQueryHint(string queryHint) => _entitiesContext.WithQueryHint(queryHint);
     }
 }

@@ -4,10 +4,12 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using GitHubVulnerabilities2Db.GraphQL;
-using GitHubVulnerabilities2Db.Ingest;
+using GitHubVulnerabilities2Db.Gallery;
+using Microsoft.Extensions.Logging;
 using Moq;
 using NuGet.Services.Entities;
+using NuGet.Services.GitHub.GraphQL;
+using NuGet.Services.GitHub.Ingest;
 using NuGet.Versioning;
 using NuGetGallery;
 using Xunit;
@@ -40,7 +42,7 @@ namespace GitHubVulnerabilities2Db.Facts
                 var advisory = new SecurityAdvisory
                 {
                     DatabaseId = 1,
-                    GhsaId = "ghsa",
+                    Permalink = "https://example/advisories/GHSA-3456-abcd-7890",
                     Severity = "MODERATE",
                     WithdrawnAt = withdrawn ? new DateTimeOffset() : (DateTimeOffset?)null
                 };
@@ -51,7 +53,8 @@ namespace GitHubVulnerabilities2Db.Facts
                     {
                         Assert.Equal(advisory.DatabaseId, vulnerability.GitHubDatabaseKey);
                         Assert.Equal(PackageVulnerabilitySeverity.Moderate, vulnerability.Severity);
-                        Assert.Equal(advisory.GetPermalink(), vulnerability.AdvisoryUrl);
+                        Assert.Equal(advisory.Permalink, vulnerability.AdvisoryUrl);
+                        Assert.Equal(withdrawn, advisory.WithdrawnAt != null);
                     })
                     .Returns(Task.CompletedTask)
                     .Verifiable();
@@ -82,7 +85,7 @@ namespace GitHubVulnerabilities2Db.Facts
                 var advisory = new SecurityAdvisory
                 {
                     DatabaseId = 1,
-                    GhsaId = "ghsa",
+                    Permalink = "https://example/advisories/GHSA-6543-dcba-0987",
                     Severity = "CRITICAL",
                     WithdrawnAt = withdrawn ? new DateTimeOffset() : (DateTimeOffset?)null,
                     Vulnerabilities = new ConnectionResponseData<SecurityVulnerability>
@@ -110,7 +113,7 @@ namespace GitHubVulnerabilities2Db.Facts
                     {
                         Assert.Equal(advisory.DatabaseId, vulnerability.GitHubDatabaseKey);
                         Assert.Equal(PackageVulnerabilitySeverity.Critical, vulnerability.Severity);
-                        Assert.Equal(advisory.GetPermalink(), vulnerability.AdvisoryUrl);
+                        Assert.Equal(advisory.Permalink, vulnerability.AdvisoryUrl);
 
                         var range = vulnerability.AffectedRanges.Single();
                         Assert.Equal(securityVulnerability.Package.Name, range.PackageId);
@@ -132,16 +135,21 @@ namespace GitHubVulnerabilities2Db.Facts
         {
             public MethodFacts()
             {
-                PackageVulnerabilityServiceMock = new Mock<IPackageVulnerabilityService>();
+                PackageVulnerabilityServiceMock = new Mock<IPackageVulnerabilitiesManagementService>();
                 GitHubVersionRangeParserMock = new Mock<IGitHubVersionRangeParser>();
-                Ingestor = new AdvisoryIngestor(
+                VulnerabilityWriter = new GalleryDbVulnerabilityWriter(
                     PackageVulnerabilityServiceMock.Object,
-                    GitHubVersionRangeParserMock.Object);
+                    Mock.Of<ILogger<GalleryDbVulnerabilityWriter>>());
+                Ingestor = new AdvisoryIngestor(
+                    GitHubVersionRangeParserMock.Object,
+                    VulnerabilityWriter,
+                    Mock.Of<ILogger<AdvisoryIngestor>>());
             }
 
-            public Mock<IPackageVulnerabilityService> PackageVulnerabilityServiceMock { get; }
+            public Mock<IPackageVulnerabilitiesManagementService> PackageVulnerabilityServiceMock { get; }
             public Mock<IGitHubVersionRangeParser> GitHubVersionRangeParserMock { get; }
             public AdvisoryIngestor Ingestor { get; }
+            public GalleryDbVulnerabilityWriter VulnerabilityWriter { get; }
         }
     }
 }

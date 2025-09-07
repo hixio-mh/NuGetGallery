@@ -50,6 +50,25 @@ namespace NuGetGallery
             return CheckPermissions(currentPrincipal, account, GetReservedNamespaces(reservedNamespace));
         }
 
+        public override bool Equals(object obj)
+        {
+            if (!base.Equals(obj))
+            {
+                return false;
+            }
+            var other = obj as ActionRequiringReservedNamespacePermissions;
+            if (other == null)
+            {
+                return false;
+            }
+            return ReservedNamespacePermissionsRequirement == other.ReservedNamespacePermissionsRequirement;
+        }
+
+        public override int GetHashCode()
+        {
+            return base.GetHashCode() ^ ReservedNamespacePermissionsRequirement.GetHashCode();
+        }
+
         protected override PermissionsCheckResult CheckPermissionsForEntity(User account, IReadOnlyCollection<ReservedNamespace> reservedNamespaces)
         {
             if (!reservedNamespaces.Any())
@@ -57,9 +76,21 @@ namespace NuGetGallery
                 return PermissionsCheckResult.Allowed;
             }
 
+            var hasAnyOwners = reservedNamespaces.Any(rn => rn.Owners.Any());
+
             // Permissions on only a single namespace are required to perform the action.
-            return reservedNamespaces.Any(rn => PermissionsHelpers.IsRequirementSatisfied(ReservedNamespacePermissionsRequirement, account, rn)) ?
-                PermissionsCheckResult.Allowed : PermissionsCheckResult.ReservedNamespaceFailure;
+            if (reservedNamespaces.Any(rn => PermissionsHelpers.IsRequirementSatisfied(ReservedNamespacePermissionsRequirement, account, rn)))
+            {
+                return PermissionsCheckResult.Allowed;
+            }
+            else if (hasAnyOwners)
+            {
+                return PermissionsCheckResult.ReservedNamespaceFailure;
+            }
+            else
+            {
+                return PermissionsCheckResult.OwnerlessReservedNamespaceFailure;
+            }
         }
 
         public PermissionsCheckResult CheckPermissionsOnBehalfOfAnyAccount(User currentUser, ActionOnNewPackageContext newPackageContext)

@@ -1,9 +1,8 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Web;
@@ -11,6 +10,7 @@ using Newtonsoft.Json.Linq;
 using NuGet.Services.Entities;
 using NuGetGallery.Configuration;
 using NuGetGallery.Diagnostics;
+using NuGetGallery.Helpers;
 using NuGetGallery.Infrastructure.Lucene;
 
 namespace NuGetGallery.Infrastructure.Search
@@ -26,7 +26,7 @@ namespace NuGetGallery.Infrastructure.Search
 
         public string IndexPath
         {
-            get { return string.Empty ; }
+            get { return string.Empty; }
         }
 
         public bool IsLocal
@@ -34,7 +34,9 @@ namespace NuGetGallery.Infrastructure.Search
             get { return false; }
         }
 
-        public bool ContainsAllVersions { get { return true; } }
+        public bool ContainsAllVersions => true;
+
+        public bool SupportsAdvancedSearch => true;
 
         public ExternalSearchService(IDiagnosticsService diagnostics, ISearchClient searchClient)
         {
@@ -60,6 +62,11 @@ namespace NuGetGallery.Infrastructure.Search
                 filter.SearchTerm,
                 projectTypeFilter: null,
                 includePrerelease: filter.IncludePrerelease,
+                frameworks: filter.Frameworks,
+                tfms: filter.Tfms,
+                includeComputedFrameworks: filter.IncludeComputedFrameworks,
+                frameworkFilterMode: filter.FrameworkFilterMode,
+                packageType: filter.PackageType,
                 sortBy: filter.SortOrder,
                 skip: filter.Skip,
                 take: filter.Take,
@@ -68,7 +75,8 @@ namespace NuGetGallery.Infrastructure.Search
                 explain: false,
                 getAllVersions: filter.IncludeAllVersions,
                 supportedFramework: filter.SupportedFramework,
-                semVerLevel: filter.SemVerLevel);
+                semVerLevel: filter.SemVerLevel,
+                includeTestData: filter.IncludeTestData);
 
             SearchResults results = null;
             if (result.IsSuccessStatusCode)
@@ -77,7 +85,7 @@ namespace NuGetGallery.Infrastructure.Search
                 if (content == null)
                 {
                     results = new SearchResults(0, null, Enumerable.Empty<Package>().AsQueryable());
-                } 
+                }
                 else if (filter.CountOnly || content.TotalHits == 0)
                 {
                     results = new SearchResults(content.TotalHits, content.IndexTimestamp);
@@ -154,7 +162,7 @@ namespace NuGetGallery.Infrastructure.Search
                 var resp = await _searchClient.GetDiagnostics();
                 if (!resp.IsSuccessStatusCode)
                 {
-                    Trace.Error("HTTP Error when retrieving diagnostics: " + ((int)resp.StatusCode).ToString());
+                    Trace.Error("HTTP Error when retrieving diagnostics: " + ((int)resp.StatusCode));
                     _diagCache = new JObject();
                 }
                 else
@@ -170,27 +178,32 @@ namespace NuGetGallery.Infrastructure.Search
                 doc.Value<JArray>("Dependencies")
                    .Cast<JObject>()
                    .Select(obj => new PackageDependency()
-                    {
-                        Id = obj.Value<string>("Id"),
-                        VersionSpec = obj.Value<string>("VersionSpec"),
-                        TargetFramework = obj.Value<string>("TargetFramework")
-                    })
+                   {
+                       Id = obj.Value<string>("Id"),
+                       VersionSpec = obj.Value<string>("VersionSpec"),
+                       TargetFramework = obj.Value<string>("TargetFramework")
+                   })
                    .ToArray();
 
-            var frameworks =
-                doc.Value<JArray>("SupportedFrameworks")
-                   .Select(v => new PackageFramework() { TargetFramework = v.Value<string>() })
-                   .ToArray();
+            var frameworks = Array.Empty<PackageFramework>();
+            if (doc.Value<JArray>("Tfms") != null)
+            {
+                frameworks = doc.Value<JArray>("Tfms")
+                                   .Select(v => new PackageFramework() { TargetFramework = v.Value<string>() })
+                                   .ToArray();
+            }
 
             var reg = doc["PackageRegistration"];
             PackageRegistration registration = null;
-            if(reg != null) {
-                registration = new PackageRegistration() {
+            if (reg != null)
+            {
+                registration = new PackageRegistration()
+                {
                     Id = reg.Value<string>("Id"),
                     Owners = reg.Value<JArray>("Owners")
                        .Select(v => new User { Username = v.Value<string>() })
                        .ToArray(),
-                    DownloadCount = reg.Value<int>("DownloadCount"),
+                    DownloadCount = reg.Value<long>("DownloadCount"),
                     IsVerified = reg.Value<bool>("Verified"),
                     Key = reg.Value<int>("Key")
                 };
@@ -200,13 +213,19 @@ namespace NuGetGallery.Infrastructure.Search
             var isLatestStable = doc.Value<bool>("IsLatestStable");
             var semVer2 = SemVerLevelKey.ForSemVerLevel(semVerLevel) == SemVerLevelKey.SemVer2;
 
+            var docDeprecation = doc["Deprecation"];
+            var deprecations = SearchResponseHelper.GetDeprecationsOrNull(docDeprecation);
+
+            var docVulnerabilities = doc.Value<JArray>("Vulnerabilities");
+            var vulnerabilities = SearchResponseHelper.GetVulnerabilities(docVulnerabilities);
+
             return new Package
             {
                 Copyright = doc.Value<string>("Copyright"),
                 Created = doc.Value<DateTime>("Created"),
                 Description = doc.Value<string>("Description"),
                 Dependencies = dependencies,
-                DownloadCount = doc.Value<int>("DownloadCount"),
+                DownloadCount = doc.Value<long>("DownloadCount"),
                 FlattenedAuthors = doc.Value<string>("Authors"),
                 FlattenedDependencies = doc.Value<string>("FlattenedDependencies"),
                 Hash = doc.Value<string>("Hash"),
@@ -238,7 +257,9 @@ namespace NuGetGallery.Infrastructure.Search
                 LicenseNames = doc.Value<string>("LicenseNames"),
                 LicenseReportUrl = doc.Value<string>("LicenseReportUrl"),
                 HideLicenseReport = doc.Value<bool>("HideLicenseReport"),
-                Listed = doc.Value<bool>("Listed")
+                Listed = doc.Value<bool>("Listed"),
+                Deprecations = deprecations,
+                VulnerablePackageRanges = vulnerabilities
             };
         }
 

@@ -1,7 +1,7 @@
 ﻿@model DisplayPackageViewModel
 
 <div class="deprecation-container">
-    <div class="icon-text alert alert-warning">
+    <div class="icon-text alert alert-brand-warning">
         <div id="show-deprecation-content-container" class="deprecation-expander" tabindex="0" data-toggle="collapse" data-target="#deprecation-content-container" aria-expanded="false" aria-controls="deprecation-content-container" aria-labelledby="deprecation-container-label" role="button">
             <div class="deprecation-expander" role="button">
                 <div class="deprecation-expander-container">
@@ -35,12 +35,12 @@
                 </div>
 
                 <div class="deprecation-expander-container">
-                    <i id="deprecation-expander-icon-right" class="deprecation-expander-icon deprecation-expander-info-right ms-Icon ms-Icon--ChevronDown" aria-hidden="true"></i>
+                    <i id="deprecation-expander-icon-right" class="deprecation-expander-icon deprecation-expander-info-right ms-Icon ms-Icon--ChevronUp" aria-hidden="true"></i>
                 </div>
             </div>
         </div>
 
-        <div class="deprecation-content-container collapse" id="deprecation-content-container">
+        <div class="deprecation-content-container collapse in" id="deprecation-content-container">
             @if (!string.IsNullOrEmpty(Model.AlternatePackageId))
             {
                 string alternateUrl;

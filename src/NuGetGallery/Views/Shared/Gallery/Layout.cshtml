@@ -8,6 +8,12 @@
     {
         <meta name="robots" content="noindex">
     }
+
+    @if (!string.IsNullOrEmpty(Config.Current.SiteRoot))
+    {
+        <link rel="canonical" href="@Url.GetCanonicalLinkUrl()">
+    }
+
     @RenderSection("SocialMeta", required: false)
     @RenderSection("Meta", required: false)
 
@@ -23,6 +29,26 @@
     }
 
     @Styles.Render("~/Content/gallery/css/site.min.css")
+    @Styles.Render("~/Content/gallery/css/bootstrap.min.css")
+
+    <script nonce="@Html.GetCSPNonce()">
+        // Check the browser preferred color scheme
+        const prefersDarkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const defaultTheme = prefersDarkMode ? "dark" : "light";
+        const preferredTheme = localStorage.getItem("theme")
+
+        // Check if the localStorage item is set, if not set it to the system theme
+        if (!preferredTheme || !(preferredTheme === "dark" || preferredTheme === "light")) {
+            localStorage.setItem("theme", "system");
+        }
+
+        if (preferredTheme === "light" || preferredTheme === "dark") {
+            document.documentElement.setAttribute('data-theme', preferredTheme);
+        }
+        else {
+            document.documentElement.setAttribute('data-theme', defaultTheme);
+        }
+    </script>
 
     <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
     <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
@@ -32,28 +58,19 @@
     <![endif]-->
 
     @RenderSection("TopStyles", required: false)
-
-    @ViewHelpers.AnalyticsScript()
+    @ViewHelpers.AnalyticsScript(ViewBag)
     @RenderSection("TopScripts", required: false)
     @ViewHelpers.ReleaseMeta()
-    @ViewHelpers.InstrumentationScript()
+    @ViewHelpers.InstrumentationScript(ViewBag)
 </head>
-<body>
+<body @{if (Request.Url.GetComponents(UriComponents.Path, UriFormat.UriEscaped) == "") { <text>id="/"</text> } }>
     @Html.Partial("Gallery/Header")
     <div id="skippedToContent">
     @RenderBody()
     </div>
-    @ViewHelpers.UsabillaButton(Url)
     @Html.Partial("Gallery/Footer")
-    @Scripts.Render("~/Scripts/gallery/site.min.js")
+    @ViewHelpers.CookieComplianceScript(@Html.GetCSPNonce())
+    @Scripts.RenderFormat("<script src=\"{0}\" nonce='" + @Html.GetCSPNonce().ToString() + "'></script>", "~/Scripts/gallery/site.min.js");
     @RenderSection("BottomScripts", required: false)
-    @if (CookieConsentMessage != null)
-    {
-        foreach (var cookieScript in CookieConsentMessage.Javascripts)
-        {
-            <script src="@cookieScript"></script>
-        }
-    }
-    @ViewHelpers.UsabillaScript()
 </body>
 </html>

@@ -4,7 +4,6 @@
 using System;
 using Moq;
 using NuGet.Services.Entities;
-using NuGetGallery.Configuration;
 using Xunit;
 
 namespace NuGetGallery
@@ -22,6 +21,7 @@ namespace NuGetGallery
             Assert.Equal("featureFlagService", ex.ParamName);
         }
 
+        [Fact]
         public void ConstructorThrowsWhenIconUrlTemplateProcessorIsNull()
         {
             var ex = Assert.Throws<ArgumentNullException>(

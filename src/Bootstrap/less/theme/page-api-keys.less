@@ -41,17 +41,62 @@
 
     .available-packages {
       .panel-body {
-        overflow: auto;
-        height: 204px;
-        padding-top: 0;
+        padding-top: 2px;
         padding-bottom: 0;
+        @media (max-width: @screen-sm-min) {
+          height: 200px;
+          overflow: auto;
+        }
+        @media (min-width: @screen-sm-min) {
+          height: auto;
+        }
       }
     }
 
     .glob-pattern-hint {
-      .panel-body {
-        height: 282px;
+      table {
+        margin-bottom: 0;
       }
+    }
+
+    .select-packages-form {
+      @media (min-width: @screen-sm-min) {
+        display: flex;
+      }
+    }
+
+    .select-packages-inputs {
+      @media (min-width: @screen-sm-min) {
+        position: relative;
+      
+        > div {
+          position: absolute;
+          top: 0;
+          left: 0;
+          bottom: 0;
+          right: 0;
+          display: flex;
+          flex-direction: column;
+          margin-right: 15px;
+          margin-left: 15px;
+
+          .available-packages-container {
+            flex: 1 1 0;
+            display: flex;
+            flex-direction: column;
+
+            .available-packages {
+              flex: 1 1 0;
+              overflow-y: auto;
+            }
+          }
+        }
+      }
+    }
+
+    .required:after {
+      color: var(--statusDangerStroke2Rest);
+      content: " *";
     }
   }
 
@@ -74,7 +119,7 @@
     }
 
     .icon-details {
-      color: @gray-light;
+      color: var(--neutralForeground1Rest);
       margin: @padding-large-vertical 0;
 
       li {
@@ -84,7 +129,12 @@
       li + li {
         margin-left: @padding-small-horizontal;
         padding-left: @padding-small-horizontal;
-        border-left: 1px solid @gray-lighter;
+        border-left: 1px solid var(--neutralForeground1Rest);
+      }
+    }
+    .package-list {
+      li {
+        overflow-y: visible;
       }
     }
   }
@@ -95,6 +145,6 @@
   }
 
   .revoke-api-key {
-    color: @brand-danger
+    color: var(--statusDangerStroke2Rest);
   }
 }

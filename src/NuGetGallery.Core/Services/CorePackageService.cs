@@ -202,6 +202,17 @@ namespace NuGetGallery
                 }
             }
 
+            // Update the ID on the PackageRegistration if the value differs only by case from the absolute latest
+            // (stable or prerelease) SemVer 2.0.0 package. This is a best effort flow because in general package IDs
+            // are compared in a case-insensitive manner and therefore the PackageRegistration ID casing should not
+            // have any functional impact. The specific casing is only a display concern.
+            if (latestSemVer2Package != null
+                && string.Equals(latestSemVer2Package.Id, packageRegistration.Id, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(latestSemVer2Package.Id, packageRegistration.Id, StringComparison.Ordinal))
+            {
+                packageRegistration.Id = latestSemVer2Package.Id;
+            }
+
             if (commitChanges)
             {
                 await _packageRepository.CommitChangesAsync();
@@ -289,23 +300,23 @@ namespace NuGetGallery
             string id, 
             PackageDeprecationFieldsToInclude deprecationFields = PackageDeprecationFieldsToInclude.None)
         {
-            bool includeDeprecation;
+            bool includeDeprecations;
             bool includeDeprecationRelationships;
 
             switch (deprecationFields)
             {
                 case PackageDeprecationFieldsToInclude.None:
-                    includeDeprecation = false;
+                    includeDeprecations = false;
                     includeDeprecationRelationships = false;
                     break;
 
                 case PackageDeprecationFieldsToInclude.Deprecation:
-                    includeDeprecation = true;
+                    includeDeprecations = true;
                     includeDeprecationRelationships = false;
                     break;
 
                 case PackageDeprecationFieldsToInclude.DeprecationAndRelationships:
-                    includeDeprecation = true;
+                    includeDeprecations = true;
                     includeDeprecationRelationships = true;
                     break;
 
@@ -319,8 +330,9 @@ namespace NuGetGallery
                 includePackageRegistration: true,
                 includeUser: true,
                 includeSymbolPackages: true,
-                includeDeprecation: includeDeprecation,
-                includeDeprecationRelationships: includeDeprecationRelationships);
+                includeDeprecations: includeDeprecations,
+                includeDeprecationRelationships: includeDeprecationRelationships,
+                includeSupportedFrameworks: false);
         }
 
         protected IQueryable<Package> GetPackagesByIdQueryable(
@@ -329,8 +341,9 @@ namespace NuGetGallery
             bool includePackageRegistration,
             bool includeUser,
             bool includeSymbolPackages,
-            bool includeDeprecation,
-            bool includeDeprecationRelationships)
+            bool includeDeprecations,
+            bool includeDeprecationRelationships,
+            bool includeSupportedFrameworks)
         {
             var packages = _packageRepository
                 .GetAll()
@@ -362,9 +375,14 @@ namespace NuGetGallery
                     .Include(p => p.Deprecations.Select(d => d.AlternatePackage.PackageRegistration))
                     .Include(p => p.Deprecations.Select(d => d.AlternatePackageRegistration));
             }
-            else if (includeDeprecation)
+            else if (includeDeprecations)
             {
                 packages = packages.Include(p => p.Deprecations);
+            }
+
+            if (includeSupportedFrameworks)
+            {
+                packages = packages.Include(p => p.SupportedFrameworks);
             }
 
             return packages;

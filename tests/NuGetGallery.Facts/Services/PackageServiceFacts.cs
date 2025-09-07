@@ -1,14 +1,13 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
-using System.Data.Entity;
-using System.Data.Entity.Migrations.Model;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Microsoft.Ajax.Utilities;
+using System.Xml.Linq;
 using Moq;
 using NuGet.Frameworks;
 using NuGet.Packaging;
@@ -18,6 +17,8 @@ using NuGetGallery.Auditing;
 using NuGetGallery.Framework;
 using NuGetGallery.Packaging;
 using NuGetGallery.Security;
+using NuGetGallery.Services;
+using NuGetGallery.TestData;
 using NuGetGallery.TestUtils;
 using Xunit;
 
@@ -33,7 +34,9 @@ namespace NuGetGallery
             Mock<ITelemetryService> telemetryService = null,
             Mock<ISecurityPolicyService> securityPolicyService = null,
             Action<Mock<PackageService>> setup = null,
-            Mock<IEntitiesContext> context = null)
+            Mock<IEntitiesContext> context = null,
+            Mock<IContentObjectService> contentObjectService = null,
+            Mock<IFeatureFlagService> featureFlagService = null)
         {
             packageRegistrationRepository = packageRegistrationRepository ?? new Mock<IEntityRepository<PackageRegistration>>();
             packageRepository = packageRepository ?? new Mock<IEntityRepository<Package>>();
@@ -43,6 +46,18 @@ namespace NuGetGallery
             securityPolicyService = securityPolicyService ?? new Mock<ISecurityPolicyService>();
             context = context ?? new Mock<IEntitiesContext>();
 
+            if (contentObjectService == null)
+            {
+                contentObjectService = new Mock<IContentObjectService>();
+                contentObjectService.Setup(x => x.QueryHintConfiguration).Returns(Mock.Of<IQueryHintConfiguration>());
+            }
+
+            if (featureFlagService == null)
+            {
+                featureFlagService = new Mock<IFeatureFlagService>();
+                featureFlagService.Setup(x => x.ArePatternSetTfmHeuristicsEnabled()).Returns(true);
+            }
+
             var packageService = new Mock<PackageService>(
                 packageRegistrationRepository.Object,
                 packageRepository.Object,
@@ -50,7 +65,9 @@ namespace NuGetGallery
                 auditingService,
                 telemetryService.Object,
                 securityPolicyService.Object,
-                context.Object);
+                context.Object,
+                contentObjectService.Object,
+                featureFlagService.Object);
 
             packageService.CallBase = true;
 
@@ -135,7 +152,7 @@ namespace NuGetGallery
             public void VerifyDoesNotThrowIfNoPackages()
             {
                 var result = InvokeMethod(new Package[]{}, "alpha", true);
-                Assert.Equal(null, result);
+                Assert.Null(result);
             }
         }
 
@@ -194,7 +211,7 @@ namespace NuGetGallery
 
                 await packageService.AddPackageOwnerAsync(packageRegistration, newOwner);
 
-                Assert.Equal(1, packageRegistration.RequiredSigners.Count);
+                Assert.Single(packageRegistration.RequiredSigners);
                 Assert.Contains(newOwner, packageRegistration.RequiredSigners);
 
                 packageRepository.VerifyAll();
@@ -239,7 +256,7 @@ namespace NuGetGallery
 
                 await packageService.AddPackageOwnerAsync(packageRegistration, newOwner);
 
-                Assert.Equal(1, packageRegistration.RequiredSigners.Count);
+                Assert.Single(packageRegistration.RequiredSigners);
                 Assert.Contains(newOwner, packageRegistration.RequiredSigners);
 
                 packageRepository.VerifyAll();
@@ -290,12 +307,13 @@ namespace NuGetGallery
                     licenseUrl: new Uri("http://thelicenseurl/"),
                     projectUrl: new Uri("http://theprojecturl/"),
                     iconUrl: new Uri("http://theiconurl/"),
-                    licenseFilename: "license.txt");
+                    licenseFilename: "license.txt",
+                    readmeFilename:"readme.md");
                 var currentUser = new User();
 
                 var package = await service.CreatePackageAsync(nugetPackage.Object, new PackageStreamMetadata(), currentUser, currentUser, isVerified: false);
 
-                // Note that there is no assertion on package identifier, because that's at the package registration level (and covered in another test).
+                Assert.Equal("theId", package.Id);
                 Assert.Equal("01.0.42.0", package.Version);
                 Assert.Equal("1.0.42", package.NormalizedVersion);
                 Assert.Equal("theFirstDependency", package.Dependencies.ElementAt(0).Id);
@@ -314,6 +332,7 @@ namespace NuGetGallery
                 Assert.Equal("theTitle", package.Title);
                 Assert.Equal("theCopyright", package.Copyright);
                 Assert.Equal(EmbeddedLicenseFileType.PlainText, package.EmbeddedLicenseType);
+                Assert.Equal(EmbeddedReadmeFileType.Markdown, package.EmbeddedReadmeType);
                 Assert.Null(package.Language);
                 Assert.False(package.IsPrerelease);
 
@@ -446,6 +465,27 @@ namespace NuGetGallery
                 Assert.Null(package.LicenseExpression);
             }
 
+            [Theory]
+            [InlineData(null, EmbeddedReadmeFileType.Absent)]
+            [InlineData("readme.md", EmbeddedReadmeFileType.Markdown)]
+            [InlineData("readme.mD", EmbeddedReadmeFileType.Markdown)]
+            public async Task WillDetectReadmeFileType(string readmeFileName, EmbeddedReadmeFileType expectedFileType)
+            {
+                var packageRegistrationRepository = new Mock<IEntityRepository<PackageRegistration>>();
+                var service = CreateService(packageRegistrationRepository: packageRegistrationRepository, setup:
+                        mockPackageService => { mockPackageService.Setup(x => x.FindPackageRegistrationById(It.IsAny<string>())).Returns((PackageRegistration)null); });
+                var nugetPackage = PackageServiceUtility.CreateNuGetPackage(
+                    licenseUrl: new Uri("http://thelicenseurl/"),
+                    projectUrl: new Uri("http://theprojecturl/"),
+                    iconUrl: new Uri("http://theiconurl/"),
+                    readmeFilename: readmeFileName);
+                var currentUser = new User();
+
+                var package = await service.CreatePackageAsync(nugetPackage.Object, new PackageStreamMetadata(), currentUser, currentUser, isVerified: false);
+
+                Assert.Equal(expectedFileType, package.EmbeddedReadmeType);
+            }
+
             [Fact]
             public async Task WillSaveLicenseExpression()
             {
@@ -556,7 +596,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillSaveTheCreatedPackageWhenANewPackageRegistrationIsCreated()
+            public async Task WillSaveTheCreatedPackageWhenANewPackageRegistrationIsCreated()
             {
                 var key = 0;
                 var packageRegistrationRepository = new Mock<IEntityRepository<PackageRegistration>>();
@@ -574,7 +614,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillSaveTheCreatedPackageWhenThePackageRegistrationAlreadyExisted()
+            public async Task WillSaveTheCreatedPackageWhenThePackageRegistrationAlreadyExisted()
             {
                 var currentUser = new User();
                 var packageRegistration = new PackageRegistration
@@ -593,7 +633,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowWhenThePackageRegistrationAndVersionAlreadyExists()
+            public async Task WillThrowWhenThePackageRegistrationAndVersionAlreadyExists()
             {
                 var currentUser = new User();
                 var packageId = "theId";
@@ -613,7 +653,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageIdIsLongerThanMaxPackageIdLength()
+            public async Task WillThrowIfTheNuGetPackageIdIsLongerThanMaxPackageIdLength()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(id: "theId".PadRight(131, '_'));
@@ -624,7 +664,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task DoesNotThrowIfTheNuGetPackageSpecialVersionContainsADot()
+            public async Task DoesNotThrowIfTheNuGetPackageSpecialVersionContainsADot()
             {
                 var user = new User();
                 var service = CreateService();
@@ -634,7 +674,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task DoesNotThrowIfTheNuGetPackageSpecialVersionContainsOnlyNumbers()
+            public async Task DoesNotThrowIfTheNuGetPackageSpecialVersionContainsOnlyNumbers()
             {
                 var user = new User();
                 var service = CreateService();
@@ -644,7 +684,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageAuthorsIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageAuthorsIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(authors: "theFirstAuthor".PadRight(2001, '_') + ", " + "theSecondAuthor".PadRight(2001, '_'));
@@ -655,7 +695,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageCopyrightIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageCopyrightIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(copyright: "theCopyright".PadRight(4001, '_'));
@@ -666,7 +706,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageReleaseNotesIsLongerThan35000()
+            public async Task WillThrowIfTheNuGetPackageReleaseNotesIsLongerThan35000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(releaseNotes: "theReleaseNotes".PadRight(35001, '_'));
@@ -677,7 +717,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheVersionIsLongerThan64Characters()
+            public async Task WillThrowIfTheVersionIsLongerThan64Characters()
             {
                 var service = CreateService();
                 var versionString = "1.0.0-".PadRight(65, 'a');
@@ -689,7 +729,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageDependenciesIsLongerThanInt16MaxValue()
+            public async Task WillThrowIfTheNuGetPackageDependenciesIsLongerThanInt16MaxValue()
             {
                 var service = CreateService();
                 var versionSpec = VersionRange.Parse("[1.0]");
@@ -714,7 +754,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfThePackageDependencyIdIsLongerThanMaxPackageIdLength()
+            public async Task WillThrowIfThePackageDependencyIdIsLongerThanMaxPackageIdLength()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(packageDependencyGroups: new[]
@@ -736,7 +776,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfThePackageContainsDuplicateDependencyGroups()
+            public async Task WillThrowIfThePackageContainsDuplicateDependencyGroups()
             {
                 var service = CreateService();
 
@@ -771,7 +811,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfThePackageDependencyVersionSpecIsLongerThan256()
+            public async Task WillThrowIfThePackageDependencyVersionSpecIsLongerThan256()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(packageDependencyGroups: new[]
@@ -805,7 +845,7 @@ namespace NuGetGallery
 
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageDescriptionIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageDescriptionIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(description: "theDescription".PadRight(4001, '_'));
@@ -816,7 +856,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageIconUrlIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageIconUrlIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(iconUrl: new Uri("http://theIconUrl/".PadRight(4001, '-'), UriKind.Absolute));
@@ -827,7 +867,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageLicenseUrlIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageLicenseUrlIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(licenseUrl: new Uri("http://theLicenseUrl/".PadRight(4001, '-'), UriKind.Absolute));
@@ -838,7 +878,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageProjectUrlIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageProjectUrlIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(projectUrl: new Uri("http://theProjectUrl/".PadRight(4001, '-'), UriKind.Absolute));
@@ -849,7 +889,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageSummaryIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageSummaryIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(summary: "theSummary".PadRight(4001, '_'));
@@ -860,7 +900,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageTagsIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageTagsIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(tags: "theTags".PadRight(4001, '_'));
@@ -871,7 +911,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageTitleIsLongerThan4000()
+            public async Task WillThrowIfTheNuGetPackageTitleIsLongerThan4000()
             {
                 var service = CreateService();
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage(title: "theTitle".PadRight(4001, '_'));
@@ -882,7 +922,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheNuGetPackageLanguageIsLongerThan20()
+            public async Task WillThrowIfTheNuGetPackageLanguageIsLongerThan20()
             {
                 // Arrange
                 var service = CreateService();
@@ -896,7 +936,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillSaveSupportedFrameworks()
+            public async Task WillSaveSupportedFrameworks()
             {
                 var packageRegistrationRepository = new Mock<IEntityRepository<PackageRegistration>>();
                 var service = CreateService(packageRegistrationRepository: packageRegistrationRepository, setup: mockPackageService =>
@@ -906,7 +946,8 @@ namespace NuGetGallery
                         new[]
                         {
                                            NuGetFramework.Parse("net40"),
-                                           NuGetFramework.Parse("net35")
+                                           NuGetFramework.Parse("net35"),
+                                           NuGetFramework.Parse("any")
                         });
                 });
                 var nugetPackage = PackageServiceUtility.CreateNuGetPackage();
@@ -916,32 +957,245 @@ namespace NuGetGallery
 
                 Assert.Equal("net40", package.SupportedFrameworks.First().TargetFramework);
                 Assert.Equal("net35", package.SupportedFrameworks.ElementAt(1).TargetFramework);
+                Assert.Equal("any", package.SupportedFrameworks.ElementAt(2).TargetFramework);
             }
 
-            [Fact]
-            private async Task WillNotSaveAnySupportedFrameworksWhenThereIsAnAnyTargetFramework()
+            [Theory]
+            [InlineData(false, new[] { "net40", "net5.0", "netcore21" })]
+            [InlineData(true, new[] { "net5.0", "netcore21" })]
+            public void UsesTfmHeuristicsBasedOnFeatureFlag(bool useNewTfmHeuristics, IEnumerable<string> expectedSupportedTfms)
             {
-                var packageRegistrationRepository = new Mock<IEntityRepository<PackageRegistration>>();
-                var service = CreateService(packageRegistrationRepository: packageRegistrationRepository, setup: mockPackageService =>
-                {
-                    mockPackageService.Setup(p => p.FindPackageRegistrationById(It.IsAny<string>())).Returns((PackageRegistration)null);
-                    mockPackageService.Setup(p => p.GetSupportedFrameworks(It.IsAny<PackageArchiveReader>())).Returns(
-                        new[]
-                        {
-                            NuGetFramework.Parse("any"),
-                            NuGetFramework.Parse("net35")
-                        });
-                });
-                var nugetPackage = PackageServiceUtility.CreateNuGetPackage();
-                var currentUser = new User();
+                // arrange
+                // - create a package that responds differently to each set of heuristics
+                var nuspec =
+                    @"<?xml version=""1.0""?>
+                        <package xmlns = ""http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd"">
+                            <metadata>
+                                <id>Foo</id>
+                                <frameworkAssemblies>
+                                    <frameworkAssembly assemblyName=""System"" targetFramework="".NETFramework4.0"" />
+                                </frameworkAssemblies>
+                            </metadata>
+                        </package>";
+                var nuspecReader = new NuspecReader(XDocument.Parse(nuspec));
+                var files = new List<string> { "lib/netcore2.1/_._", "lib/net5.0/_._" };
+                var package = new MockPackageArchiveReader(nuspecReader, files);
 
-                var package = await service.CreatePackageAsync(nugetPackage.Object, new PackageStreamMetadata(), currentUser, currentUser, isVerified: false);
+                // - create feature flag services and package services for both scenarios
+                var featureFlagService = new Mock<IFeatureFlagService>();
+                featureFlagService.Setup(x => x.ArePatternSetTfmHeuristicsEnabled()).Returns(useNewTfmHeuristics);
 
-                Assert.Empty(package.SupportedFrameworks);
+                // act
+                var supportedFrameworks = CreateService(featureFlagService: featureFlagService).GetSupportedFrameworks(package)
+                    .Select(f => f.GetShortFolderName())
+                    .OrderBy(f => f)
+                    .ToList();
+
+                // assert
+                Assert.Equal<string>(expectedSupportedTfms, supportedFrameworks);
             }
 
+            [Theory]
+            [MemberData(nameof(TargetFrameworkCases))]
+            public void DeterminesCorrectSupportedFrameworksFromFileList(bool isTools, List<string> files, List<string> expectedSupportedFrameworks)
+            {
+                // arrange
+                var nuspec = isTools
+                    ? @"<?xml version=""1.0""?>
+                        <package xmlns = ""http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd"">
+                            <metadata>
+                                <id>Foo</id>
+                                <packageTypes>
+                                    <packageType name=""DotnetTool""/>
+                                </packageTypes>
+                            </metadata>
+                        </package>"
+                    : @"<?xml version=""1.0""?>
+                        <package xmlns = ""http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd"">
+                            <metadata>
+                                <id>Foo</id>
+                            </metadata>
+                        </package>";
+                var nuspecReader = new NuspecReader(XDocument.Parse(nuspec));
+
+                // act
+                var supportedFrameworks = CreateService().GetSupportedFrameworks(nuspecReader, files)
+                    .Select(f => f.GetShortFolderName())
+                    .OrderBy(f => f)
+                    .ToList();
+
+                // assert
+                Assert.Equal<string>(expectedSupportedFrameworks, supportedFrameworks);
+            }
+
+            /// <summary>
+            /// These cases use the guidance laid out here:
+            /// https://docs.microsoft.com/en-us/nuget/create-packages/creating-a-package
+            /// https://docs.microsoft.com/en-us/nuget/create-packages/supporting-multiple-target-frameworks
+            /// https://docs.microsoft.com/en-us/nuget/reference/target-frameworks
+            /// https://docs.microsoft.com/en-us/dotnet/standard/frameworks
+            /// </summary>
+            public static IEnumerable<object[]> TargetFrameworkCases =>
+                new List<object[]>
+                {
+                    // Runtimes
+                    // - note that without "runtimes/" we don't use runtime ids (RIDs).
+                    new object[] {false, new List<string> {"lib/net40/_._", "lib/net45/_._"}, new List<string> {"net40", "net45"}},
+                    new object[] {false, new List<string> {"lib/net40/_._", "lib/net471/_._"}, new List<string> {"net40", "net471"}},
+                    new object[] {false, new List<string> {"lib/net40/_._", "lib/net4.7.1/_._"}, new List<string> {"net40", "net471"}},
+                    new object[] {false, new List<string> {"lib/netcoreapp31/_._", "lib/netstandard20/_._"}, new List<string> {"netcoreapp3.1", "netstandard2.0"}},
+                    new object[] {false, new List<string> {"lib/_._"}, new List<string> {"net"}},        // no version
+                    new object[] {false, new List<string> {"lib/win/_._"}, new List<string> {"win"}},    // note that this is "win" the TFM (i.e. dep'd/replaced by netcore45), not "win" the RID.
+                    new object[] {false, new List<string> {"lib/foo/_._"}, new List<string> {"foo"}},    // this will be generated as a TFM if users use it, but it's meaningless to us
+                    new object[] {false, new List<string> {"lib/any/_._"}, new List<string> {"dotnet"}}, // "dotnet" is deprecated but is still discernable through this pattern
+                    // - resources
+                    new object[] {false, new List<string> {"lib/netcoreapp31/zh-hant/_._", "lib/netstandard20/zh_hant_._"}, new List<string> {"netcoreapp3.1", "netstandard2.0"}},
+                    new object[] {false, new List<string> {"lib/netcoreapp31/fr-fr/_._", "lib/netstandard20/zh_hans_._"}, new List<string> {"netcoreapp3.1", "netstandard2.0"}},
+                    // - portables
+                    new object[] {false, new List<string> {"lib/portable-net45+sl40+win+wp71/_._", "lib/portable-net45+sl50+win+wp71+wp80/_._"},
+                        new List<string> {"portable-net45+sl4+win+wp71", "portable-net45+sl5+win+wp71+wp8"}},
+                    new object[] {false, new List<string> {"lib/portable-profile14/_._", "lib/portable-profile154/_._", "lib/portable-profile7/_._"},
+                        new List<string> {"portable-net40+sl5", "portable-net45+sl4+win8+wp8", "portable-net45+win8"}},
+                    new object[] {false, new List<string> {"lib/portable-net45+sl50+foo50+wp71+wp80/_._", "lib/portable-net45+foo40+win+wp71/_._"},
+                        new List<string> {"portable-net45+sl5+unsupported+wp71+wp8", "portable-net45+unsupported+win+wp71"}},
+                    new object[] {false, new List<string> {"lib/portable-net45+monotouch+monoandroid10+xamarintvos/_._"}, new List<string> { "portable-monoandroid10+monotouch+net45+xamarintvos"}},
+                    // - including "runtimes/" gives us the option of runtime ids (RIDs) but these won't affect TFM determination
+                    new object[] {false, new List<string> {"runtimes/win/net40/_._", "runtimes/win/net471/_._"}, new List<string>()},                   // no "lib" dir
+                    new object[] {false, new List<string> {"runtimes/win/foostuff/net40/_._", "runtimes/win/foostuff/net471/_._"}, new List<string>()}, // no "lib" dir
+                    new object[] {false, new List<string> {"runtimes/win/lib/net40/_._", "runtimes/win/lib/net471/_._"}, new List<string> {"net40", "net471"}},
+                    new object[] {false, new List<string> {"runtimes/win/lib/net40/", "runtimes/win/lib/net471/_._"}, new List<string> {"net471"}},     // no file in "net40" dir
+                    // - resources
+                    new object[] {false, new List<string> {"runtimes/win/lib/net471/_._", "runtimes/win/lib/net472/fr-fr/_._"}, new List<string> {"net471", "net472"}},
+                    // - supporting different TFMs for different RIDs won't be exposed here--we just want the union set of all supported TFMs
+                    new object[] {false, new List<string> {"runtimes/win10-x64/lib/net40/_._", "runtimes/win10-arm/lib/net471/_._"}, new List<string> {"net40", "net471"}},
+                    // - net5.0+ runtimes
+                    new object[] {false, new List<string> {"lib/net5.0/_._", "lib/net5.0/_._"}, new List<string> {"net5.0"}},
+                    new object[] {false, new List<string> {"lib/net5.0-tvos/_._", "lib/net5.0-ios/_._"}, new List<string> {"net5.0-ios", "net5.0-tvos"}},
+                    new object[] {false, new List<string> {"lib/net5.0-tvos/_._", "lib/net5.0-ios13.0/_._"}, new List<string> {"net5.0-ios13.0", "net5.0-tvos"}},
+                    new object[] {false, new List<string> {"lib/net5.1-tvos/_._", "lib/net5.1/_._", "lib/net5.0-tvos/_._"}, new List<string> {"net5.0-tvos", "net5.1", "net5.1-tvos"}},
+                    new object[] {false, new List<string> {"lib/net5.0/_1._", "lib/net5.0/_2._", "lib/native/_._"}, new List<string> {"native", "net5.0" }},
+
+                    // Compile time refs
+                    new object[] {false, new List<string> {"ref/_._"}, new List<string>()},
+                    new object[] {false, new List<string> {"ref/net40/_._", "ref/net451/_._"}, new List<string> {"net40", "net451"}},
+                    new object[] {false, new List<string> {"ref/net5.0-watchos/_1._", "ref/net5.0-watchos/_2._" }, new List<string> {"net5.0-watchos"}},
+                    new object[] {false, new List<string> {"ref/net5.0-macos/_1._", "ref/net5.0-windows/_2._" }, new List<string> {"net5.0-macos", "net5.0-windows"}},
+
+                    // Build props/targets
+                    // - only if a props or target file is present of the name {id}.props|targets ({id} is "Foo" in our case) will the TFM be supported
+                    new object[] {false, new List<string> {"build/net40/Foo.props", "build/net42/Foo.targets"}, new List<string> {"net40", "net42"}},
+                    new object[] {false, new List<string> {"build/net40/Bar.props", "build/net42/Foo.targets"}, new List<string> {"net42"}},
+                    new object[] {false, new List<string> {"build/net40/Bar.props", "build/net42/Bar.targets"}, new List<string>()},
+                    new object[] {false, new List<string> {"build/net5.0/Foo.props", "build/net42/Foo.targets"}, new List<string> {"net42", "net5.0"}},
+                    // - "any" is a special case for build, where having no specific TFM is valid
+                    new object[] {false, new List<string> {"build/Foo.props", "build/Foo.targets"}, new List<string> {"any"}},
+                    new object[] {false, new List<string> {"build/Bar.props", "build/Foo.targets"}, new List<string> {"any"}},
+                    new object[] {false, new List<string> {"build/Bar.props", "build/Bar.targets"}, new List<string>()},
+
+                    // Tools
+                    // - a special case where we will only assess tools TFMs when the nuspec indicates it is a tools (and only a tools) package - hence the true bool
+                    // - also, a file in the TFM root doesn't qualify a TFM-supported tool - an RID or "any" must be provided
+                    // - see this: https://github.com/NuGet/Home/issues/6197#issuecomment-349495271 - "any" covers portables.
+                    new object[] {true, new List<string> {"tools/netcoreapp3.1/_._"}, new List<string>()},
+                    new object[] {true, new List<string> {"tools/netcoreapp3.1/win10-x86/_._"}, new List<string> {"netcoreapp3.1"}},
+                    new object[] {true, new List<string> {"tools/netcoreapp3.1/win10-x86/tool1/_._", "tools/netcoreapp3.1/win10-x86/tool2/_._" }, 
+                        new List<string> {"netcoreapp3.1"}},
+                    new object[] {true, new List<string> {"tools/netcoreapp3.1/any/_._"}, new List<string> {"netcoreapp3.1"}},
+                    new object[] {true, new List<string> {"tools/netcoreapp3.1/win/tool1/_._"}, new List<string> {"netcoreapp3.1"}},
+                    new object[] {true, new List<string> {"tools/netcoreapp3.1/win/any/_._"}, new List<string> {"netcoreapp3.1"}},
+                    new object[] {false, new List<string> {"tools/netcoreapp3.1/any/_._"}, new List<string>()}, // not a tools package, no supported TFMs
+
+                    // Content
+                    new object[] {false, new List<string> {"contentFiles/css/_._"}, new List<string>()},
+                    new object[] {false, new List<string> {"contentFiles/any/_._"}, new List<string>()},
+                    new object[] {false, new List<string> {"contentFiles/cs/netstandard2.0/_._"}, new List<string>{"netstandard2.0"}},
+                    new object[] {false, new List<string> {"contentFiles/any/netstandard2.0/_._"}, new List<string>{"netstandard2.0"}},
+                    new object[] {false, new List<string> {"contentFiles/cs/any/_._"}, new List<string>{"any"}},
+                    new object[] {false, new List<string> {"contentFiles/vb/net45/_._", "contentFiles/cs/netcoreapp3.1/_._"},
+                        new List<string>{"net45", "netcoreapp3.1"}},
+
+                    // Combinations
+                    new object[] 
+                    {
+                        false,
+                        new List<string>
+                        {
+                            "Foo.nuspec",
+                            "runtimes/win10-x86/lib/net40/_._",
+                            "runtimes/win10-x86/lib/net471/_._",
+                            "ref/net5.0-watchos/_1._",
+                            "ref/net5.0-watchos/_2._",
+                            "build/netstandard21/Foo.props",
+                            "build/netstandard20/Foo.targets",
+                            "tools/netcoreapp3.1/win10-x86/tool1/_._",
+                            "tools/netcoreapp3.1/win10-x86/tool2/_._"
+                        }, 
+                        new List<string>{"net40", "net471", "net5.0-watchos", "netstandard2.0", "netstandard2.1"}
+                    },
+                    // - note that a tools package (true below) is *only* a tools package when evaluating TFM support
+                    new object[] 
+                    {
+                        true, // tools package
+                        new List<string>
+                        {
+                            "Foo.nuspec",
+                            "runtimes/win10-x86/lib/net40/_._",
+                            "runtimes/win10-x86/lib/net471/_._",
+                            "ref/net5.0-watchos/_1._",
+                            "ref/net5.0-watchos/_2._",
+                            "build/netstandard21/Foo.props",
+                            "build/netstandard20/Foo.targets",
+                            "tools/netcoreapp3.1/win10-x86/tool1/_._",
+                            "tools/netcoreapp3.1/win10-x86/tool2/_._"
+                        }, 
+                        new List<string> {"netcoreapp3.1"}
+                    },
+                    new object[]
+                    {
+                        false,
+                        new List<string>
+                        {
+                            "Foo.nuspec",
+                            "runtimes/win10-x86/lib/xamarinios/_._",
+                            "runtimes/win10-x64/lib/xamarinios/_._",
+                            "ref/xamarinios/_1._",
+                            "ref/xamarinios/_2._",
+                            "build/netstandard21/Foo.props",
+                            "build/netstandard21/Foo.targets",
+                            "contentFiles/vb/net45/_._", 
+                            "contentFiles/cs/netstandard2.1/_._"
+                        },
+                        new List<string>{"net45", "netstandard2.1", "xamarinios"}
+                    },
+                    new object[]
+                    {
+                        false, 
+                        new List<string>
+                        {
+                            ".signature.p7s",
+                            "LICENSE.md",
+                            "Foo.nuspec",
+                            "fooIcon.png",
+                            "[Content_Types].xml",
+                            "_rels/.rels",
+                            "package/service/metadata/core-properties/foo1234.psmdcp",
+                            "lib/net20/Foo.dll",
+                            "lib/net35/Foo.dll",
+                            "lib/net40/Foo.dll",
+                            "lib/net45/Foo.dll",
+                            "lib/netstandard1.0/Foo.dll",
+                            "lib/netstandard1.3/Foo.dll",
+                            "lib/netstandard2.0/Foo.dll",
+                            "lib/portable-net40+sl5+win8+wp8+wpa81/Foo.dll",
+                            "lib/portable-net45+win8+wp8+wpa81/Foo.dll"
+                        },
+                        new List<string> {"net20", "net35", "net40", "net45", "netstandard1.0", "netstandard1.3", "netstandard2.0",
+                            "portable-net40+sl5+win8+wp8+wpa81", "portable-net45+win8+wp8+wpa81"}
+                    }
+                };
+
             [Fact]
-            private async Task WillThrowIfTheRepositoryTypeIsLongerThan100()
+            public async Task WillThrowIfTheRepositoryTypeIsLongerThan100()
             {
                 // Arrange
                 var service = CreateService();
@@ -962,7 +1216,7 @@ namespace NuGetGallery
             }
 
             [Fact]
-            private async Task WillThrowIfTheRepositoryUrlIsLongerThan4000()
+            public async Task WillThrowIfTheRepositoryUrlIsLongerThan4000()
             {
                 // Arrange
                 var service = CreateService();
@@ -996,7 +1250,7 @@ namespace NuGetGallery
             [InlineData("1.0.0")]
             public void ReturnsNullIfEmptyList(string version)
             {
-                Assert.Equal(null, InvokeMethod(new Package[0], version));
+                Assert.Null(InvokeMethod(Array.Empty<Package>(), version));
             }
 
             [Theory]
@@ -1010,7 +1264,7 @@ namespace NuGetGallery
                     CreateTestPackage("2.0.0")
                 };
 
-                Assert.Equal(null, InvokeMethod(packages, version));
+                Assert.Null(InvokeMethod(packages, version));
             }
 
             /// <remarks>
@@ -1149,6 +1403,108 @@ namespace NuGetGallery
             }
         }
 
+        public class TheFindPackagesByProfileMethod
+        {
+            protected const string Id = "theId";
+
+            [Fact]
+            public void ReturnsSinglePackageAsExpected()
+            {
+                // Arrange
+                var owner = new User { Key = 1, Username = "owner" };
+
+                var package = new Package
+                {
+                    Version = "1.1.1",
+
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "package",
+                        Owners = new[] { owner },
+                        DownloadCount = 150
+                    },
+
+                    DownloadCount = 100,
+                    PackageStatusKey = PackageStatus.Available,
+                    Listed = true,
+                    IsLatestSemVer2 = true,
+                };
+                var invalidatedPackage = new Package
+                {
+                    Version = "1.0.0",
+
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "packageFailedValidation",
+                        Owners = new[] { owner },
+                        DownloadCount = 0
+                    },
+
+                    DownloadCount = 0,
+                    PackageStatusKey = PackageStatus.FailedValidation,
+                    Listed = true,
+                };
+                var validatingPackage = new Package
+                {
+                    Version = "1.0.0",
+
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "packageValidating",
+                        Owners = new[] { owner },
+                        DownloadCount = 0
+                    },
+
+                    DownloadCount = 0,
+                    PackageStatusKey = PackageStatus.Validating,
+                    Listed = true,
+                };
+                var deletedPackage = new Package
+                {
+                    Version = "1.0.0",
+
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "packageDeleted",
+                        Owners = new[] { owner },
+                        DownloadCount = 0
+                    },
+
+                    DownloadCount = 0,
+                    PackageStatusKey = PackageStatus.Deleted,
+                    Listed = false,
+                };
+
+                var packages = new[] { package, invalidatedPackage, validatingPackage, deletedPackage };
+
+                // Act
+                var result = InvokeMethod(packages, owner);
+
+                // Assert
+                Assert.NotNull(result.Packages);
+                Assert.Single(result.Packages);
+                Assert.Equal(1, result.PackageCount);
+                Assert.Equal(150, result.TotalDownloadCount);
+            }
+
+            [Fact]
+            public void ThrowsIfUserNull()
+            {
+                Assert.Throws<ArgumentNullException>(() => InvokeMethod([], null));
+            }
+
+            protected virtual (IReadOnlyCollection<Package> Packages, long TotalDownloadCount, int PackageCount) InvokeMethod(Package[] packages, User owner)
+            {
+                var repository = new Mock<IEntityRepository<Package>>(MockBehavior.Strict);
+                repository
+                    .Setup(repo => repo.GetAll())
+                    .Returns(packages.AsQueryable());
+                var service = CreateService(packageRepository: repository);
+
+                return service.FindPackagesByProfile(owner, 1, 20);
+            }
+        }
+
         public class TheFindPackageByIdAndVersionMethod : TheFilterLatestPackageMethod
         {
             [Fact]
@@ -1193,126 +1549,147 @@ namespace NuGetGallery
 
         public class TheFindPackagesByOwnerMethod : TheFindPackagesByOwnersMethodsBase
         {
-            public static IEnumerable<object[]> TestData_RoleVariants
-            {
-                get
-                {
-                    var roles = TheFindPackagesByOwnersMethodsBase.CreateTestUserRoles();
-
-                    yield return new object[] { roles.Admin, roles.Admin };
-                    yield return new object[] { roles.Organization, roles.Organization };
-                }
-            }
-
             public override IEnumerable<Package> InvokeFindPackagesByOwner(User user, bool includeUnlisted, bool includeVersions = false)
             {
                 return PackageService.FindPackagesByOwner(user, includeUnlisted, includeVersions);
             }
 
-            [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsAListedPackage(User currentUser, User packageOwner)
-              => base.ReturnsAListedPackage(currentUser, packageOwner);
+            public override bool IsMatchingOwner(User currentUser, User packageOwner)
+            {
+                return currentUser.Key == packageOwner.Key;
+            }
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(User currentUser, User packageOwner)
-              => base.ReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(currentUser, packageOwner);
+            public void ReturnsAListedPackage(User currentUser, User packageOwner)
+                => InternalReturnsAListedPackage(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(User currentUser, User packageOwner)
-              => base.ReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(currentUser, packageOwner);
+            public void ReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(User currentUser, User packageOwner)
+                => InternalReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsAPackageForEachPackageRegistration(User currentUser, User packageOwner)
-              => base.ReturnsAPackageForEachPackageRegistration(currentUser, packageOwner);
+            public void ReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(User currentUser, User packageOwner)
+                => InternalReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsOnlyLatestStableSemVer2PackageIfBothExist(User currentUser, User packageOwner)
-              => base.ReturnsOnlyLatestStableSemVer2PackageIfBothExist(currentUser, packageOwner);
+            public void ReturnsAPackageForEachPackageRegistration(User currentUser, User packageOwner)
+                => InternalReturnsAPackageForEachPackageRegistration(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(User currentUser, User packageOwner)
-              => base.ReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(currentUser, packageOwner);
+            public void ReturnsOnlyLatestStableSemVer2PackageIfBothExist(User currentUser, User packageOwner)
+                => InternalReturnsOnlyLatestStableSemVer2PackageIfBothExist(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(User currentUser, User packageOwner)
-                => base.ReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(currentUser, packageOwner);
+            public void ReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(User currentUser, User packageOwner)
+                => InternalReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsFirstIfMultiplePackagesSetToLatest(User currentUser, User packageOwner)
-              => base.ReturnsFirstIfMultiplePackagesSetToLatest(currentUser, packageOwner);
+            public void ReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(User currentUser, User packageOwner)
+                => InternalReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(User currentUser, User packageOwner)
-              => base.ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(currentUser, packageOwner);
+            public void ReturnsFirstIfMultiplePackagesSetToLatest(User currentUser, User packageOwner)
+                => InternalReturnsFirstIfMultiplePackagesSetToLatest(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(User currentUser, User packageOwner)
-              => base.ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(currentUser, packageOwner);
+            public void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(User currentUser, User packageOwner)
+                => InternalReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(currentUser, packageOwner);
+
+            [Theory]
+            [MemberData(nameof(TestData_RoleVariants))]
+            public void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(User currentUser, User packageOwner)
+                => InternalReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(currentUser, packageOwner);
         }
 
         public class TheFindPackagesByAnyMatchingOwnerMethod : TheFindPackagesByOwnersMethodsBase
         {
-            public static IEnumerable<object[]> TestData_RoleVariants
-            {
-                get
-                {
-                    var roles = TheFindPackagesByOwnersMethodsBase.CreateTestUserRoles();
-
-                    yield return new object[] { roles.Admin, roles.Admin };
-                    yield return new object[] { roles.Admin, roles.Organization };
-                    yield return new object[] { roles.Collaborator, roles.Organization };
-                }
-            }
-
             public override IEnumerable<Package> InvokeFindPackagesByOwner(User user, bool includeUnlisted, bool includeVersions = false)
             {
                 return PackageService.FindPackagesByAnyMatchingOwner(user, includeUnlisted, includeVersions);
             }
 
-            [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsAListedPackage(User currentUser, User packageOwner)
-              => base.ReturnsAListedPackage(currentUser, packageOwner);
+            public override bool IsMatchingOwner(User currentUser, User packageOwner)
+            {
+                return true;
+            }
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(User currentUser, User packageOwner)
-              => base.ReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(currentUser, packageOwner);
+            public void ReturnsAListedPackage(User currentUser, User packageOwner)
+                => InternalReturnsAListedPackage(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(User currentUser, User packageOwner)
-              => base.ReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(currentUser, packageOwner);
+            public void ReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(User currentUser, User packageOwner)
+                => InternalReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsAPackageForEachPackageRegistration(User currentUser, User packageOwner)
-              => base.ReturnsAPackageForEachPackageRegistration(currentUser, packageOwner);
+            public void ReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(User currentUser, User packageOwner)
+                => InternalReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsOnlyLatestStableSemVer2PackageIfBothExist(User currentUser, User packageOwner)
-              => base.ReturnsOnlyLatestStableSemVer2PackageIfBothExist(currentUser, packageOwner);
+            public void ReturnsAPackageForEachPackageRegistration(User currentUser, User packageOwner)
+                => InternalReturnsAPackageForEachPackageRegistration(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(User currentUser, User packageOwner)
-              => base.ReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(currentUser, packageOwner);
+            public void ReturnsOnlyLatestStableSemVer2PackageIfBothExist(User currentUser, User packageOwner)
+                => InternalReturnsOnlyLatestStableSemVer2PackageIfBothExist(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(User currentUser, User packageOwner)
-                => base.ReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(currentUser, packageOwner);
+            public void ReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(User currentUser, User packageOwner)
+                => InternalReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsFirstIfMultiplePackagesSetToLatest(User currentUser, User packageOwner)
-              => base.ReturnsFirstIfMultiplePackagesSetToLatest(currentUser, packageOwner);
+            public void ReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(User currentUser, User packageOwner)
+                => InternalReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(User currentUser, User packageOwner)
-              => base.ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(currentUser, packageOwner);
+            public void ReturnsFirstIfMultiplePackagesSetToLatest(User currentUser, User packageOwner)
+                => InternalReturnsFirstIfMultiplePackagesSetToLatest(currentUser, packageOwner);
 
+            [Theory]
             [MemberData(nameof(TestData_RoleVariants))]
-            public override void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(User currentUser, User packageOwner)
-              => base.ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(currentUser, packageOwner);
+            public void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(User currentUser, User packageOwner)
+                => InternalReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(currentUser, packageOwner);
+
+            [Theory]
+            [MemberData(nameof(TestData_RoleVariants))]
+            public void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(User currentUser, User packageOwner)
+                => InternalReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(currentUser, packageOwner);
         }
 
         public abstract class TheFindPackagesByOwnersMethodsBase : TestContainer
         {
+            public static IEnumerable<object[]> TestData_RoleVariants
+            {
+                get
+                {
+                    var roles = CreateTestUserRoles();
+
+                    yield return new object[] { roles.Admin, roles.Admin };
+                    yield return new object[] { roles.Collaborator, roles.Collaborator };
+                    yield return new object[] { roles.Admin, roles.Organization };
+                    yield return new object[] { roles.Collaborator, roles.Organization };
+                }
+            }
+
             public abstract IEnumerable<Package> InvokeFindPackagesByOwner(User user, bool includeUnlisted, bool includeVersions = false);
+            public abstract bool IsMatchingOwner(User currentUser, User packageOwner);
 
             protected class TestUserRoles
             {
@@ -1361,8 +1738,7 @@ namespace NuGetGallery
                 }
             }
 
-            [Theory]
-            public virtual void ReturnsAListedPackage(User currentUser, User packageOwner)
+            public virtual void InternalReturnsAListedPackage(User currentUser, User packageOwner)
             {
                 var packageRegistration = new PackageRegistration { Id = "theId", Owners = { packageOwner } };
                 var package = new Package { Version = "1.0", PackageRegistration = packageRegistration, Listed = true, IsLatestSemVer2 = true, IsLatestStableSemVer2 = true };
@@ -1374,11 +1750,17 @@ namespace NuGetGallery
                 context.Packages.Add(package);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: false);
-                Assert.Single(packages);
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Single(packages);
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
-            [Theory]
-            public virtual void ReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(User currentUser, User packageOwner)
+            public virtual void InternalReturnsNoUnlistedPackagesWhenIncludeUnlistedIsFalse(User currentUser, User packageOwner)
             {
                 var packageRegistration = new PackageRegistration { Id = "theId", Owners = { packageOwner } };
                 var package = new Package { Version = "1.0", PackageRegistration = packageRegistration, Listed = false, IsLatest = false, IsLatestStable = false };
@@ -1393,8 +1775,7 @@ namespace NuGetGallery
                 Assert.Empty(packages);
             }
 
-            [Theory]
-            public virtual void ReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(User currentUser, User packageOwner)
+            public virtual void InternalReturnsAnUnlistedPackageWhenIncludeUnlistedIsTrue(User currentUser, User packageOwner)
             {
                 var packageRegistration = new PackageRegistration { Id = "theId", Owners = { packageOwner } };
                 var package = new Package { Version = "1.0", PackageRegistration = packageRegistration, Listed = false, IsLatest = false, IsLatestStable = false };
@@ -1406,11 +1787,17 @@ namespace NuGetGallery
                 context.Packages.Add(package);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: true);
-                Assert.Single(packages);
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Single(packages);
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
-            [Theory]
-            public virtual void ReturnsAPackageForEachPackageRegistration(User currentUser, User packageOwner)
+            public virtual void InternalReturnsAPackageForEachPackageRegistration(User currentUser, User packageOwner)
             {
                 var packageRegistrationA = new PackageRegistration { Key = 0, Id = "idA", Owners = { packageOwner } };
                 var packageRegistrationB = new PackageRegistration { Key = 1, Id = "idB", Owners = { packageOwner } };
@@ -1443,13 +1830,19 @@ namespace NuGetGallery
                 context.Packages.Add(packageB);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: false).ToList();
-                Assert.Equal(2, packages.Count);
-                Assert.Contains(packageA, packages);
-                Assert.Contains(packageB, packages);
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Equal(2, packages.Count);
+                    Assert.Contains(packageA, packages);
+                    Assert.Contains(packageB, packages);
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
-            [Theory]
-            public virtual void ReturnsOnlyLatestStableSemVer2PackageIfBothExist(User currentUser, User packageOwner)
+            public virtual void InternalReturnsOnlyLatestStableSemVer2PackageIfBothExist(User currentUser, User packageOwner)
             {
                 var packageRegistration = new PackageRegistration { Id = "theId", Owners = { packageOwner } };
                 var latestPackage = new Package { Version = "2.0.0-alpha", PackageRegistration = packageRegistration, Listed = true, IsLatest = true };
@@ -1465,12 +1858,18 @@ namespace NuGetGallery
                 context.Packages.Add(latestStablePackage);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: false).ToList();
-                Assert.Single(packages);
-                Assert.Contains(latestStablePackage, packages);
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Single(packages);
+                    Assert.Contains(latestStablePackage, packages);
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
-            [Theory]
-            public virtual void ReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(User currentUser, User packageOwner)
+            public virtual void InternalReturnsOnlyLatestStablePackageIfNoLatestStableSemVer2Exist(User currentUser, User packageOwner)
             {
                 var packageRegistration = new PackageRegistration { Id = "theId", Owners = { packageOwner } };
                 var latestPackage = new Package { Version = "2.0.0-alpha", PackageRegistration = packageRegistration, Listed = true, IsLatest = true };
@@ -1485,22 +1884,35 @@ namespace NuGetGallery
                 context.Packages.Add(latestStablePackage);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: false).ToList();
-                Assert.Single(packages);
-                Assert.Contains(latestStablePackage, packages);
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Single(packages);
+                    Assert.Contains(latestStablePackage, packages);
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
-            [Theory]
-            public virtual void ReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(User currentUser, User packageOwner)
+            public virtual void InternalReturnsCorrectLatestVersionForMixedSemVer2AndNonSemVer2PackageVersions_IncludeUnlistedTrue(User currentUser, User packageOwner)
             {
                 var context = GetMixedVersioningPackagesContext(currentUser, packageOwner);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: true).ToList();
 
-                var nugetCatalogReaderPackage = packages.Single(p => p.PackageRegistration.Id == "NuGet.CatalogReader");
-                Assert.Equal("1.5.12+git.78e44a8", NuGetVersionFormatter.ToFullString(nugetCatalogReaderPackage.Version));
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    var nugetCatalogReaderPackage = packages.Single(p => p.PackageRegistration.Id == "NuGet.CatalogReader");
+                    Assert.Equal("1.5.12+git.78e44a8", NuGetVersionFormatter.ToFullString(nugetCatalogReaderPackage.Version));
 
-                var sleetLibPackage = packages.Single(p => p.PackageRegistration.Id == "SleetLib");
-                Assert.Equal("2.2.24+git.f2a0cb6", NuGetVersionFormatter.ToFullString(sleetLibPackage.Version));
+                    var sleetLibPackage = packages.Single(p => p.PackageRegistration.Id == "SleetLib");
+                    Assert.Equal("2.2.24+git.f2a0cb6", NuGetVersionFormatter.ToFullString(sleetLibPackage.Version));
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
             protected FakeEntitiesContext GetMixedVersioningPackagesContext(User currentUser, User packageOwner)
@@ -1551,8 +1963,7 @@ namespace NuGetGallery
                 return context;
             }
 
-            [Theory]
-            public virtual void ReturnsFirstIfMultiplePackagesSetToLatest(User currentUser, User packageOwner)
+            public virtual void InternalReturnsFirstIfMultiplePackagesSetToLatest(User currentUser, User packageOwner)
             {
                 // Verify behavior to work around IsLatest concurrency issue: https://github.com/NuGet/NuGetGallery/issues/2514
                 var packageRegistration = new PackageRegistration { Id = "theId", Owners = { packageOwner } };
@@ -1568,12 +1979,18 @@ namespace NuGetGallery
                 context.Packages.Add(package1);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: false);
-                Assert.Single(packages);
-                Assert.Contains(package2, packages);
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Single(packages);
+                    Assert.Contains(package2, packages);
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
-            [Theory]
-            public virtual void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(User currentUser, User packageOwner)
+            public virtual void InternalReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedTrue(User currentUser, User packageOwner)
             {
                 var packageRegistration = new PackageRegistration { Key = 0, Id = "theId", Owners = { packageOwner } };
 
@@ -1606,11 +2023,17 @@ namespace NuGetGallery
                 context.Packages.Add(package2);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: true, includeVersions: true);
-                Assert.Equal(2, packages.Count());
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Equal(2, packages.Count());
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
 
-            [Theory]
-            public virtual void ReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(User currentUser, User packageOwner)
+            public virtual void InternalReturnsVersionsWhenIncludedVersionsIsTrue_IncludeUnlistedFalse(User currentUser, User packageOwner)
             {
                 var packageRegistration = new PackageRegistration { Id = "theId", Owners = { packageOwner } };
                 var package1 = new Package { Version = "1.0", PackageRegistration = packageRegistration, Listed = false, IsLatest = false, IsLatestStable = false };
@@ -1626,7 +2049,14 @@ namespace NuGetGallery
                 context.Packages.Add(package2);
 
                 var packages = InvokeFindPackagesByOwner(currentUser, includeUnlisted: false, includeVersions: true);
-                Assert.Single(packages);
+                if (IsMatchingOwner(currentUser, packageOwner))
+                {
+                    Assert.Single(packages);
+                }
+                else
+                {
+                    Assert.Empty(packages);
+                }
             }
         }
 
@@ -2142,6 +2572,85 @@ namespace NuGetGallery
         public class TheGetPackageDependentsMethod
         {
             [Fact]
+            public void AllQueriesShouldUseQueryHint()
+            {
+                string id = "foo";
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+                var disposable = new Mock<IDisposable>();
+
+                var operations = new List<string>();
+
+                disposable
+                    .Setup(x => x.Dispose())
+                    .Callback(() => operations.Add(nameof(IDisposable.Dispose)));
+                context
+                    .Setup(x => x.WithQueryHint(It.IsAny<string>()))
+                    .Returns(() => disposable.Object)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.WithQueryHint)));
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.PackageDependencies)));
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.Packages)));
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.PackageRegistrations)));
+
+                var service = CreateService(context: context);
+
+                service.GetPackageDependents(id);
+
+                Assert.Equal(nameof(EntitiesContext.WithQueryHint), operations.First());
+                Assert.All(
+                    operations.Skip(1).Take(operations.Count - 2),
+                    o => Assert.Contains(
+                        o,
+                        new[]
+                        {
+                            nameof(EntitiesContext.PackageDependencies),
+                            nameof(EntitiesContext.Packages),
+                            nameof(EntitiesContext.PackageRegistrations),
+                        }));
+                Assert.Equal(nameof(IDisposable.Dispose), operations.Last());
+
+                disposable.Verify(x => x.Dispose(), Times.Once);
+                context.Verify(x => x.WithQueryHint(It.IsAny<string>()), Times.Once);
+                context.Verify(x => x.WithQueryHint("OPTIMIZE FOR UNKNOWN"), Times.Once);
+            }
+
+            [Fact]
+            public void UsesRecompileIfConfigured()
+            {
+                string id = "Newtonsoft.Json";
+
+                var context = new Mock<IEntitiesContext>();
+                var contentObjectService = new Mock<IContentObjectService>();
+                var queryHintConfiguration = new Mock<IQueryHintConfiguration>();
+                contentObjectService.Setup(x => x.QueryHintConfiguration).Returns(() => queryHintConfiguration.Object);
+                queryHintConfiguration.Setup(x => x.ShouldUseRecompileForPackageDependents(id)).Returns(true);
+
+                var entityContext = new FakeEntitiesContext();
+
+                context.Setup(f => f.PackageDependencies).Returns(entityContext.PackageDependencies);
+                context.Setup(f => f.Packages).Returns(entityContext.Packages);
+                context.Setup(f => f.PackageRegistrations).Returns(entityContext.PackageRegistrations);
+
+                var service = CreateService(context: context, contentObjectService: contentObjectService);
+
+                service.GetPackageDependents(id);
+
+                queryHintConfiguration.Verify(x => x.ShouldUseRecompileForPackageDependents(It.IsAny<string>()), Times.Once);
+                queryHintConfiguration.Verify(x => x.ShouldUseRecompileForPackageDependents(id), Times.Once);
+                context.Verify(x => x.WithQueryHint(It.IsAny<string>()), Times.Once);
+                context.Verify(x => x.WithQueryHint("RECOMPILE"), Times.Once);
+            }
+
+            [Fact]
             public void ThereAreExactlyFivePackagesAndAllPackagesAreVerified()
             {
                 string id = "foo";
@@ -2312,7 +2821,7 @@ namespace NuGetGallery
 
                 var result = service.GetPackageDependents(id);
                 Assert.Equal(0, result.TotalPackageCount);
-                Assert.Equal(0, result.TopPackages.Count);
+                Assert.Empty(result.TopPackages);
             }
 
             [Fact]
@@ -2358,7 +2867,7 @@ namespace NuGetGallery
                 var result = service.GetPackageDependents(id);
 
                 Assert.Equal(0, result.TotalPackageCount);
-                Assert.Equal(0, result.TopPackages.Count);
+                Assert.Empty(result.TopPackages);
             }
 
             [Fact]
@@ -2824,7 +3333,7 @@ namespace NuGetGallery
 
                 foreach (var packageRegistration in packageRegistrations)
                 {
-                    Assert.Equal(1, packageRegistration.RequiredSigners.Count);
+                    Assert.Single(packageRegistration.RequiredSigners);
                     Assert.Equal(_user1, packageRegistration.RequiredSigners.Single());
                 }
 
@@ -2921,7 +3430,7 @@ namespace NuGetGallery
 
                 await service.SetRequiredSignerAsync(_packageRegistration, _user1);
 
-                Assert.Equal(1, _packageRegistration.RequiredSigners.Count);
+                Assert.Single(_packageRegistration.RequiredSigners);
                 Assert.Equal(_user1, _packageRegistration.RequiredSigners.Single());
 
                 packageRegistrationRepository.Verify(x => x.CommitChangesAsync(), Times.Once);
@@ -2954,7 +3463,7 @@ namespace NuGetGallery
 
                 await service.SetRequiredSignerAsync(_packageRegistration, _user2);
 
-                Assert.Equal(1, _packageRegistration.RequiredSigners.Count);
+                Assert.Single(_packageRegistration.RequiredSigners);
                 Assert.Equal(_user2, _packageRegistration.RequiredSigners.Single());
 
                 packageRegistrationRepository.Verify(x => x.CommitChangesAsync(), Times.Once);
@@ -3013,7 +3522,7 @@ namespace NuGetGallery
 
                 await service.SetRequiredSignerAsync(_packageRegistration, _user1);
 
-                Assert.Equal(1, _packageRegistration.RequiredSigners.Count);
+                Assert.Single(_packageRegistration.RequiredSigners);
                 Assert.Equal(_user1, _packageRegistration.RequiredSigners.Single());
 
                 packageRegistrationRepository.Verify(x => x.CommitChangesAsync(), Times.Never);
@@ -3068,6 +3577,189 @@ namespace NuGetGallery
                 service.EnrichPackageFromNuGetPackage(package, packageArchiveReader, packageMetadata, new PackageStreamMetadata(), new User());
 
                 Assert.Equal(expectedFlag, package.HasEmbeddedIcon);
+            }
+
+            [Theory]
+            [InlineData("readme.md", true)]
+            [InlineData(null, false)]
+            public void SetsHasReadmeFlagProperly(string readmeFilename, bool expectedFlag)
+            {
+                var service = CreateService();
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "SomePackage"
+                    },
+                    HasReadMe = false,
+                };
+
+                // the EnrichPackageFromNuGetPackage method does not read readme filename from the PackageArchiveReader
+                // so we won't bother setting it up here.
+                var packageStream = PackageServiceUtility.CreateNuGetPackageStream(package.Id);
+
+                var packageArchiveReader = new PackageArchiveReader(packageStream);
+
+                var metadataDictionary = new Dictionary<string, string>
+                {
+                    { "version", "1.2.3" },
+                };
+
+                if (readmeFilename != null)
+                {
+                    metadataDictionary.Add("readme", readmeFilename);
+                }
+
+                var packageMetadata = new PackageMetadata(
+                    metadataDictionary,
+                    Enumerable.Empty<PackageDependencyGroup>(),
+                    Enumerable.Empty<FrameworkSpecificGroup>(),
+                    Enumerable.Empty<NuGet.Packaging.Core.PackageType>(),
+                    new NuGetVersion(3, 2, 1),
+                    repositoryMetadata: null,
+                    licenseMetadata: null);
+
+                service.EnrichPackageFromNuGetPackage(package, packageArchiveReader, packageMetadata, new PackageStreamMetadata(), new User());
+
+                Assert.Equal(expectedFlag, package.HasReadMe);
+            }
+
+            [Theory]
+            [InlineData("Foo", "Foo", "Bar")]
+            [InlineData("Foo", "foo", "Bar")]
+            public void DeduplicatesPackageTypes(string packageA, string packageB, string packageC)
+            {
+                var service = CreateService();
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "SomePackage"
+                    },
+                    PackageTypes = [],
+                };
+
+                var packageStream = PackageServiceUtility.CreateNuGetPackageStream(package.Id);
+                var packageArchiveReader = new PackageArchiveReader(packageStream);
+
+                var metadataDictionary = new Dictionary<string, string>
+                {
+                    { "version", "1.2.3" },
+                };
+
+                var packageTypes = new List<NuGet.Packaging.Core.PackageType>
+                {
+                    new(packageA, new Version("1.0.0")),
+                    new(packageB, new Version("1.0.0")),
+                    new(packageC, new Version("1.0.0")),
+                };
+
+                var packageMetadata = new PackageMetadata(
+                    metadataDictionary,
+                    Enumerable.Empty<PackageDependencyGroup>(),
+                    Enumerable.Empty<FrameworkSpecificGroup>(),
+                    packageTypes,
+                    new NuGetVersion(3, 2, 1),
+                    repositoryMetadata: null,
+                    licenseMetadata: null);
+
+                service.EnrichPackageFromNuGetPackage(package, packageArchiveReader, packageMetadata, new PackageStreamMetadata(), new User());
+
+                Assert.Equal(2, package.PackageTypes.Count);
+                Assert.Equal(packageA, package.PackageTypes.First().Name);
+                Assert.Equal(packageC, package.PackageTypes.Last().Name);
+            }
+
+            [Fact]
+            public void NoOpForMcpServerPackageTypeWithMissingMetadataFile()
+            {
+                var service = CreateService();
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "SomePackage"
+                    },
+                    PackageTypes = [],
+                };
+
+                var packageTypes = new List<NuGet.Packaging.Core.PackageType>
+                {
+                    new("DotnetTool", new Version("1.0.0")),
+                    new("McpServer", new Version("1.0.0")),
+                };
+
+                var packageStream = PackageServiceUtility.CreateNuGetPackageStream(package.Id, packageTypes: packageTypes);
+                var packageArchiveReader = new PackageArchiveReader(packageStream);
+
+                var metadataDictionary = new Dictionary<string, string>
+                {
+                    { "version", "1.2.3" },
+                };
+
+                var packageMetadata = new PackageMetadata(
+                    metadataDictionary,
+                    Enumerable.Empty<PackageDependencyGroup>(),
+                    Enumerable.Empty<FrameworkSpecificGroup>(),
+                    packageTypes,
+                    new NuGetVersion(3, 2, 1),
+                    repositoryMetadata: null,
+                    licenseMetadata: null);
+
+                service.EnrichPackageFromNuGetPackage(package, packageArchiveReader, packageMetadata, new PackageStreamMetadata(), new User());
+
+                Assert.Equal(2, package.PackageTypes.Count);
+                Assert.Equal("DotnetTool", package.PackageTypes.First().Name);
+                Assert.Equal("McpServer", package.PackageTypes.Last().Name);
+                Assert.Null(package.PackageTypes.Last().CustomData);
+            }
+
+            [Fact]
+            public void MinifiesMcpServerMetadata()
+            {
+                var service = CreateService();
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "SomePackage"
+                    },
+                    PackageTypes = [],
+                };
+
+                var packageTypes = new List<NuGet.Packaging.Core.PackageType>
+                {
+                    new("DotnetTool", new Version("1.0.0")),
+                    new("McpServer", new Version("1.0.0")),
+                };
+
+                var packageStream = PackageServiceUtility.CreateNuGetPackageStream(
+                    id: package.Id,
+                    packageTypes: packageTypes,
+                    mcpServerMetadataFilename: ".mcp/server.json",
+                    mcpServerMetadataFileContents: Encoding.UTF8.GetBytes(McpServerData.ServerJsonValid));
+                var packageArchiveReader = new PackageArchiveReader(packageStream);
+
+                var metadataDictionary = new Dictionary<string, string>
+                {
+                    { "version", "1.2.3" },
+                };
+
+                var packageMetadata = new PackageMetadata(
+                    metadataDictionary,
+                    Enumerable.Empty<PackageDependencyGroup>(),
+                    Enumerable.Empty<FrameworkSpecificGroup>(),
+                    packageTypes,
+                    new NuGetVersion(3, 2, 1),
+                    repositoryMetadata: null,
+                    licenseMetadata: null);
+
+                service.EnrichPackageFromNuGetPackage(package, packageArchiveReader, packageMetadata, new PackageStreamMetadata(), new User());
+
+                Assert.Equal(2, package.PackageTypes.Count);
+                Assert.Equal("DotnetTool", package.PackageTypes.First().Name);
+                Assert.Equal("McpServer", package.PackageTypes.Last().Name);
+                Assert.Equal(McpServerData.ServerJsonValidMinified, package.PackageTypes.Last().CustomData);
             }
         }
     }

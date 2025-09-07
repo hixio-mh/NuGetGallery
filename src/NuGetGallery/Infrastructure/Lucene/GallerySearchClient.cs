@@ -30,16 +30,18 @@ namespace NuGetGallery.Infrastructure.Search
             return new ServiceResponse<JObject>(await _httpClient.GetAsync(_diagnosticsPath, null));
         }
 
-        // This code is copied from the SearchClient 
+        // This code is copied from the SearchClient [and modified a bit] 
         private static readonly Dictionary<SearchModels.SortOrder, string> SortNames = new Dictionary<SearchModels.SortOrder, string>
         {
-            {SearchModels.SortOrder.LastEdited, "lastEdited"},
-            {SearchModels.SortOrder.Relevance, "relevance"},
-            {SearchModels.SortOrder.Published, "published"},
-            {SearchModels.SortOrder.TitleAscending, "title-asc"},
-            {SearchModels.SortOrder.TitleDescending, "title-desc"},
-            {SearchModels.SortOrder.CreatedAscending, "created-asc"},
-            {SearchModels.SortOrder.CreatedDescending, "created-desc"},
+            {SearchModels.SortOrder.LastEdited, GalleryConstants.SearchSortNames.LastEdited},
+            {SearchModels.SortOrder.Relevance, GalleryConstants.SearchSortNames.Relevance},
+            {SearchModels.SortOrder.Published, GalleryConstants.SearchSortNames.Published},
+            {SearchModels.SortOrder.TitleAscending, GalleryConstants.SearchSortNames.TitleAsc},
+            {SearchModels.SortOrder.TitleDescending, GalleryConstants.SearchSortNames.TitleDesc},
+            {SearchModels.SortOrder.CreatedAscending, GalleryConstants.SearchSortNames.CreatedAsc},
+            {SearchModels.SortOrder.CreatedDescending, GalleryConstants.SearchSortNames.CreatedDesc},
+            {SearchModels.SortOrder.TotalDownloadsAscending, GalleryConstants.SearchSortNames.TotalDownloadsAsc},
+            {SearchModels.SortOrder.TotalDownloadsDescending, GalleryConstants.SearchSortNames.TotalDownloadsDesc},
         };
 
         // This code is copied from the SearchClient 
@@ -47,6 +49,11 @@ namespace NuGetGallery.Infrastructure.Search
             string query,
             string projectTypeFilter = null,
             bool includePrerelease = false,
+            string frameworks = null,
+            string tfms = null,
+            bool includeComputedFrameworks = true,
+            string frameworkFilterMode = null,
+            string packageType = "",
             SearchModels.SortOrder sortBy = SearchModels.SortOrder.Relevance,
             int skip = 0,
             int take = 10,
@@ -55,13 +62,35 @@ namespace NuGetGallery.Infrastructure.Search
             bool explain = false,
             bool getAllVersions = false,
             string supportedFramework = null,
-            string semVerLevel = null)
+            string semVerLevel = null,
+            bool includeTestData = false)
         {
             IDictionary<string, string> nameValue = new Dictionary<string, string>();
             nameValue.Add("q", query);
             nameValue.Add("skip", skip.ToString());
             nameValue.Add("take", take.ToString());
-            nameValue.Add("sortBy", SortNames[sortBy]);
+
+            if (!string.IsNullOrEmpty(frameworks))
+            {
+                nameValue.Add("frameworks", frameworks);
+            }
+
+            if (!string.IsNullOrEmpty(tfms))
+            {
+                nameValue.Add("tfms", tfms);
+            }
+
+            nameValue.Add("includeComputedFrameworks", includeComputedFrameworks.ToString().ToLower());
+
+            if (!string.IsNullOrEmpty(frameworkFilterMode))
+            {
+                nameValue.Add("frameworkFilterMode", frameworkFilterMode);
+            }
+
+            if (!string.IsNullOrEmpty(packageType))
+            {
+                nameValue.Add("packageType", packageType);
+            }
 
             if (!String.IsNullOrEmpty(semVerLevel))
             {
@@ -102,6 +131,13 @@ namespace NuGetGallery.Infrastructure.Search
             {
                 nameValue.Add("countOnly", "true");
             }
+
+            if (includeTestData)
+            {
+                nameValue.Add("testData", "true");
+            }
+
+            nameValue.Add("sortBy", SortNames[sortBy]);
 
             var qs = new FormUrlEncodedContent(nameValue);
             var queryString = await qs.ReadAsStringAsync();

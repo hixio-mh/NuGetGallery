@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -39,12 +39,20 @@ namespace NuGetGallery.Filters
                             GalleryConstants.WarningHeaderName,
                             string.Format(CultureInfo.InvariantCulture, Strings.WarningApiKeyExpired, accountUrl));
                     }
-                    else if (expirationPeriod.TotalDays <= controller.NuGetContext.Config.Current.WarnAboutExpirationInDaysForApiKeyV1)
+                    else if (expirationPeriod.TotalDays <= controller.NuGetContext.Config.Current.WarnAboutExpirationInDaysForApiKeyV1 &&
+                        !apiKeyCredential.IsType(CredentialTypes.ApiKey.V5))
                     {
                         // about to expire warning
+                        var expirationDays = Math.Round(expirationPeriod.TotalDays, 0);
+                        var expiration = expirationDays + " " + (expirationDays == 1 ? "day" : "days");
+
                         filterContext.HttpContext.Response.Headers.Add(
                             GalleryConstants.WarningHeaderName,
-                            string.Format(CultureInfo.InvariantCulture, Strings.WarningApiKeyAboutToExpire, Math.Round(expirationPeriod.TotalDays, 0), accountUrl));
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                Strings.WarningApiKeyAboutToExpire,
+                                expiration,
+                                accountUrl));
                     }
                 }
             }

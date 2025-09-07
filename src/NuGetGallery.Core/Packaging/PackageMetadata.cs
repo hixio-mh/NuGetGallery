@@ -40,6 +40,8 @@ namespace NuGetGallery.Packaging
             "serviceable",
         };
 
+        private const string TagsElement = "tags";
+
         private readonly Dictionary<string, string> _metadata;
         private readonly IReadOnlyCollection<PackageDependencyGroup> _dependencyGroups;
         private readonly IReadOnlyCollection<FrameworkSpecificGroup> _frameworkReferenceGroups;
@@ -101,6 +103,7 @@ namespace NuGetGallery.Packaging
             Tags = GetValue(PackageMetadataStrings.Tags, (string)null);
             Language = GetValue(PackageMetadataStrings.Language, (string)null);
             IconFile = GetValue(PackageMetadataStrings.Icon, (string)null);
+            ReadmeFile = GetValue(PackageMetadataStrings.Readme, (string)null);
 
             Owners = GetValue(PackageMetadataStrings.Owners, (string)null);
 
@@ -140,6 +143,12 @@ namespace NuGetGallery.Packaging
         /// Null if not specified.
         /// </summary>
         public string IconFile { get; private set; }
+
+        /// <summary>
+        /// Contains the embedded readme filename taken from the 'readme' node of the nuspec file.
+        /// Null if not specified.
+        /// </summary>
+        public string ReadmeFile { get; private set; }
 
         public string GetValueFromMetadata(string key)
         {
@@ -230,9 +239,18 @@ namespace NuGetGallery.Packaging
                 }
             }
 
-            // Reject invalid metadata element names. Today this only rejects element names that collide with
-            // properties generated downstream.
-            var metadataKeys = new HashSet<string>(metadataLookup.Select(g => g.Key));
+            // Reject invalid metadata element names.
+            var metadataElements = metadataLookup.Select(g => g.Key).ToList();
+            var unexpectedTagsCasings = metadataElements.Where(element => element.Equals(TagsElement, StringComparison.OrdinalIgnoreCase) && element != TagsElement).ToList();
+            if (unexpectedTagsCasings.Any())
+            {
+                throw new PackagingException(string.Format(
+                    CoreStrings.Manifest_InvalidMetadataElements,
+                    string.Join("', '", unexpectedTagsCasings.OrderBy(x => x))));
+            }
+
+            // This only rejects element names that collide with properties generated downstream.
+            var metadataKeys = new HashSet<string>(metadataElements);
             metadataKeys.IntersectWith(RestrictedMetadataElements);
             if (metadataKeys.Any())
             {
@@ -266,14 +284,22 @@ namespace NuGetGallery.Packaging
                 }
             }
 
-            return new PackageMetadata(
+            var packageMetadata = new PackageMetadata(
                 nuspecReader.GetMetadata().ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 nuspecReader.GetDependencyGroups(useStrictVersionCheck: strict),
-                nuspecReader.GetFrameworkReferenceGroups(),
+                nuspecReader.GetFrameworkAssemblyGroups(),
                 nuspecReader.GetPackageTypes(),
                 nuspecReader.GetMinClientVersion(),
                 nuspecReader.GetRepositoryMetadata(),
                 nuspecReader.GetLicenseMetadata());
+
+            // Fix null or empty description values for reflowed packages
+            if (!strict)
+            {
+                packageMetadata.Description = packageMetadata.Description ?? string.Empty;
+            }
+
+            return packageMetadata;
         }
 
         private class StrictNuspecReader : NuspecReader

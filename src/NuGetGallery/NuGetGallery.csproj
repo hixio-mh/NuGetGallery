@@ -1,8 +1,8 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
-  <Import Project="..\..\sign.thirdparty.props" />
   <PropertyGroup>
+    <UseNuGetBuildExtensions>true</UseNuGetBuildExtensions>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProductVersion>
@@ -91,14 +91,6 @@
   <ItemGroup>
     <Reference Include="Microsoft.Build.Framework" />
     <Reference Include="Microsoft.Build.Utilities.v4.0" />
-    <Reference Include="Microsoft.WindowsAzure.Diagnostics, Version=2.7.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>C:\Program Files\Microsoft SDKs\Azure\.NET SDK\v2.7\bin\plugins\Diagnostics\Microsoft.WindowsAzure.Diagnostics.dll</HintPath>
-    </Reference>
-    <Reference Include="Microsoft.WindowsAzure.ServiceRuntime, Version=2.7.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>C:\Program Files\Microsoft SDKs\Azure\.NET SDK\v2.7\ref\Microsoft.WindowsAzure.ServiceRuntime.dll</HintPath>
-    </Reference>
     <Reference Include="MonAgentListener, Version=33.1.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL" />
     <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.IdentityModel" />
@@ -125,24 +117,32 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ActionName.cs" />
+    <Compile Include="App_Start\GalleryMachineKeyConfigurationProvider.cs" />
     <Compile Include="App_Start\LatestVersionRouteConstraint.cs" />
     <Compile Include="App_Start\NuGetODataV2FeedConfig.cs" />
     <Compile Include="App_Start\NuGetODataV1FeedConfig.cs" />
     <Compile Include="App_Start\NuGetODataConfig.cs" />
     <Compile Include="App_Start\StorageDependent.cs" />
-    <Compile Include="App_Start\SessionPersistence.cs" />
     <Compile Include="App_Start\WebApiConfig.cs" />
     <Compile Include="App_Start\AutofacConfig.cs" />
     <Compile Include="Areas\Admin\Controllers\ApiKeysController.cs" />
     <Compile Include="Areas\Admin\Controllers\DeleteAccountController.cs" />
     <Compile Include="Areas\Admin\Controllers\DeleteController.cs" />
     <Compile Include="Areas\Admin\Controllers\FeaturesController.cs" />
+    <Compile Include="Areas\Admin\Controllers\CorrectIsLatestController.cs" />
+    <Compile Include="Areas\Admin\Controllers\FederatedCredentialsController.cs" />
+    <Compile Include="Areas\Admin\Controllers\LockUserController.cs" />
     <Compile Include="Areas\Admin\Controllers\LockPackageController.cs" />
+    <Compile Include="Areas\Admin\Controllers\PasswordAuthenticationController.cs" />
+    <Compile Include="Areas\Admin\Controllers\PopularityTransferController.cs" />
     <Compile Include="Areas\Admin\Controllers\ReservedNamespaceController.cs" />
     <Compile Include="Areas\Admin\Controllers\RevalidationController.cs" />
     <Compile Include="Areas\Admin\Controllers\SecurityPolicyController.cs" />
     <Compile Include="Areas\Admin\Controllers\SiteAdminsController.cs" />
     <Compile Include="Areas\Admin\Controllers\SupportRequestController.cs" />
+    <Compile Include="Areas\Admin\Controllers\PackageOwnershipController.cs" />
+    <Compile Include="Areas\Admin\Controllers\UpdateListedController.cs" />
+    <Compile Include="Areas\Admin\Controllers\ChangeUsernameController.cs" />
     <Compile Include="Areas\Admin\Controllers\ValidationController.cs" />
     <Compile Include="Areas\Admin\DynamicData\FieldTemplates\Url_Edit.ascx.cs">
       <DependentUpon>Url_Edit.ascx</DependentUpon>
@@ -174,8 +174,16 @@
     <Compile Include="Areas\Admin\Models\DeletedStatus.cs" />
     <Compile Include="Areas\Admin\Migrations\SupportRequestMigrationsConfiguration.cs" />
     <Compile Include="Areas\Admin\Models\RevokeApiKeysRequest.cs" />
+    <Compile Include="Areas\Admin\Models\ValidateAccountResult.cs" />
+    <Compile Include="Areas\Admin\Models\ValidateUsernameResult.cs" />
     <Compile Include="Areas\Admin\Services\RevalidationAdminService.cs" />
     <Compile Include="Areas\Admin\Services\ValidationAdminService.cs" />
+    <Compile Include="Areas\Admin\ViewModels\CorrectIsLatestRequest.cs" />
+    <Compile Include="Areas\Admin\ViewModels\ExceptionEmailListViewModel.cs" />
+    <Compile Include="Areas\Admin\Models\CorrectIsLatestPackage.cs" />
+    <Compile Include="Areas\Admin\ViewModels\PopularityTransferViewModel.cs" />
+    <Compile Include="Areas\Admin\ViewModels\UserCredential.cs" />
+    <Compile Include="Areas\Admin\ViewModels\UserCredentialSearchResult.cs" />
     <Compile Include="Areas\Admin\ViewModels\DeleteAccountAsAdminViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\FeatureFlagsFeatureViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\FeatureFlagsFlightViewModel.cs" />
@@ -186,16 +194,24 @@
     <Compile Include="Areas\Admin\ViewModels\IFeatureFlagsViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\IModifyFeatureFlagsViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\LockPackageViewModel.cs" />
+    <Compile Include="Areas\Admin\ViewModels\LockState.cs" />
+    <Compile Include="Areas\Admin\ViewModels\LockUserViewModel.cs" />
+    <Compile Include="Areas\Admin\ViewModels\LockViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\ModifyFeatureFlagsFeatureViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\ModifyFeatureFlagsFlightViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\ApiKeyRevokeViewModel.cs" />
+    <Compile Include="Areas\Admin\ViewModels\PackageOwnershipChangesInput.cs" />
+    <Compile Include="Areas\Admin\ViewModels\PackageOwnershipState.cs" />
+    <Compile Include="Areas\Admin\ViewModels\PackageOwnershipChangesModel.cs" />
+    <Compile Include="Areas\Admin\ViewModels\PackageRegistrationOwnershipChangeModel.cs" />
+    <Compile Include="Areas\Admin\ViewModels\PackageRegistrationUserChangeModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\SiteAdminsViewModel.cs" />
-    <Compile Include="Areas\Admin\ViewModels\ValidatedPackageViewModel.cs" />
+    <Compile Include="Areas\Admin\ViewModels\NuGetPackageValidationViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\RevalidationPageViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\ValidationPageViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\DeleteAccountSearchResult.cs" />
     <Compile Include="Areas\Admin\Services\ValidationEntityRepository.cs" />
-    <Compile Include="Areas\Admin\ViewModels\DeleteSearchResult.cs" />
+    <Compile Include="Areas\Admin\ViewModels\PackageSearchResult.cs" />
     <Compile Include="Areas\Admin\ViewModels\HomeViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\UserViewModel.cs" />
     <Compile Include="Areas\Admin\ViewModels\ReservedNamespaceResultModel.cs" />
@@ -211,9 +227,16 @@
     <Compile Include="Authentication\AuthDependenciesModule.cs" />
     <Compile Include="Controllers\ExperimentsController.cs" />
     <Compile Include="Controllers\ManageDeprecationJsonApiController.cs" />
+    <Compile Include="Controllers\TokenApiController.cs" />
     <Compile Include="ExtensionMethods.cs" />
+    <Compile Include="Extensions\CakeBuildManagerExtensions.cs" />
     <Compile Include="Extensions\ImageExtensions.cs" />
-    <Compile Include="Helpers\ValidationHelper.cs" />
+    <Compile Include="Filters\AdminActionAttribute.cs" />
+    <Compile Include="Filters\RequiresUserAgentAttribute.cs" />
+    <Compile Include="Helpers\AdminHelper.cs" />
+    <Compile Include="Helpers\CSPHelper.cs" />
+    <Compile Include="Helpers\InvalidZipEntry.cs" />
+    <Compile Include="Helpers\SearchResponseHelper.cs" />
     <Compile Include="Helpers\ViewModelExtensions\DeleteAccountListPackageItemViewModelFactory.cs" />
     <Compile Include="Helpers\ViewModelExtensions\DeletePackageViewModelFactory.cs" />
     <Compile Include="Helpers\ViewModelExtensions\DisplayLicenseViewModelFactory.cs" />
@@ -222,10 +245,13 @@
     <Compile Include="Helpers\ViewModelExtensions\ListPackageItemViewModelFactory.cs" />
     <Compile Include="Helpers\ViewModelExtensions\ManagePackageViewModelFactory.cs" />
     <Compile Include="Helpers\ViewModelExtensions\PackageViewModelFactory.cs" />
+    <Compile Include="Helpers\WarningTitleHelper.cs" />
     <Compile Include="Infrastructure\ABTestEnrollment.cs" />
     <Compile Include="Infrastructure\ABTestEnrollmentState.cs" />
     <Compile Include="Infrastructure\ABTestEnrollmentFactory.cs" />
     <Compile Include="Infrastructure\CookieBasedABTestService.cs" />
+    <Compile Include="Infrastructure\Jobs\PackageVulnerabilitiesCacheRefreshJob.cs" />
+    <Compile Include="Infrastructure\Mail\Messages\ApiKeyRevokedMessage.cs" />
     <Compile Include="Infrastructure\RequestValidationExceptionFilter.cs" />
     <Compile Include="Infrastructure\HttpStatusCodeWithHeadersResult.cs" />
     <Compile Include="Infrastructure\IABTestEnrollmentFactory.cs" />
@@ -246,8 +272,6 @@
     <Compile Include="Infrastructure\Mail\Messages\TwoFactorFeedbackMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\SearchSideBySideMessage.cs" />
     <Compile Include="Infrastructure\HijackSearchServiceFactory.cs" />
-    <Compile Include="Infrastructure\ODataCachedEndpoint.cs" />
-    <Compile Include="Infrastructure\ODataCacheOutputAttribute.cs" />
     <Compile Include="Infrastructure\UserDeletedErrorFilter.cs" />
     <Compile Include="Infrastructure\SearchServiceFactory.cs" />
     <Compile Include="Migrations\201903020136235_CvesCanBeEmpty.cs" />
@@ -298,6 +322,60 @@
     <Compile Include="Migrations\202006011927336_AddIndexToPackageDependencies.designer.cs">
       <DependentUpon>202006011927336_AddIndexToPackageDependencies.cs</DependentUpon>
     </Compile>
+    <Compile Include="Migrations\202007220027197_AddEmbeddedReadmeTypeColumn.cs" />
+    <Compile Include="Migrations\202007220027197_AddEmbeddedReadmeTypeColumn.designer.cs">
+      <DependentUpon>202007220027197_AddEmbeddedReadmeTypeColumn.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Migrations\202104062157118_AddVersionSpecificId.cs" />
+    <Compile Include="Migrations\202104062157118_AddVersionSpecificId.designer.cs">
+      <DependentUpon>202104062157118_AddVersionSpecificId.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Migrations\202201242159337_AddUserStatusKeyColumn.cs" />
+    <Compile Include="Migrations\202201242159337_AddUserStatusKeyColumn.designer.cs">
+      <DependentUpon>202201242159337_AddUserStatusKeyColumn.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Migrations\202202010109383_AddCreatedSecurelyToCredentials.cs" />
+    <Compile Include="Migrations\202202010109383_AddCreatedSecurelyToCredentials.designer.cs">
+      <DependentUpon>202202010109383_AddCreatedSecurelyToCredentials.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Migrations\202205300006043_Int64PackageDownloadCount.cs" />
+    <Compile Include="Migrations\202205300006043_Int64PackageDownloadCount.designer.cs">
+      <DependentUpon>202205300006043_Int64PackageDownloadCount.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Migrations\202410302050035_AddFederatedCredentials.cs" />
+    <Compile Include="Migrations\202410302050035_AddFederatedCredentials.Designer.cs">
+      <DependentUpon>202410302050035_AddFederatedCredentials.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Migrations\202506250741123_AddCustomDataToPackageTypes.cs" />
+    <Compile Include="Migrations\202506250741123_AddCustomDataToPackageTypes.Designer.cs">
+      <DependentUpon>202506250741123_AddCustomDataToPackageTypes.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Migrations\202507101756059_AddFederatedCredentialPolicyName.cs" />
+    <Compile Include="Migrations\202507101756059_AddFederatedCredentialPolicyName.Designer.cs">
+      <DependentUpon>202507101756059_AddFederatedCredentialPolicyName.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Modules\CookieComplianceHttpModule.cs" />
+    <Compile Include="RequestModels\DeletePackagesApiRequest.cs" />
+    <Compile Include="RequestModels\UpdateListedRequest.cs" />
+    <Compile Include="Services\ListedVerb.cs" />
+    <Compile Include="Services\MissingLicenseValidationMessageV2.cs" />
+    <Compile Include="Services\NormalizedPackageIdInfo.cs" />
+    <Compile Include="Services\NullTyposquattingService.cs" />
+    <Compile Include="Services\MissingMcpServerMetadataMessage.cs" />
+    <Compile Include="Services\UploadPackageMissingReadme.cs" />
+    <Compile Include="Services\MissingLicenseValidationMessage.cs" />
+    <Compile Include="Services\UploadPackageIdNamespaceConflict.cs" />
+    <Compile Include="Services\ImageDomainValidator.cs" />
+    <Compile Include="Services\IMarkdownService.cs" />
+    <Compile Include="Services\IImageDomainValidator.cs" />
+    <Compile Include="Services\IPackageVulnerabilitiesService.cs" />
+    <Compile Include="Services\IPackageMetadataValidationService.cs" />
+    <Compile Include="Services\IPackageVulnerabilitiesCacheService.cs" />
+    <Compile Include="Services\MarkdownService.cs" />
+    <Compile Include="Services\OwnerlessNamespaceIdConflictMessage.cs" />
+    <Compile Include="Services\PackageVulnerabilitiesCacheService.cs" />
+    <Compile Include="Services\PackageVulnerabilitiesService.cs" />
+    <Compile Include="Services\PackageMetadataValidationService.cs" />
     <Compile Include="Services\ConfigurationIconFileProvider.cs" />
     <Compile Include="Services\IconUrlDeprecationValidationMessage.cs" />
     <Compile Include="Services\GravatarProxyResult.cs" />
@@ -342,14 +420,11 @@
     <Compile Include="Filters\ValidateRecaptchaResponseAttribute.cs" />
     <Compile Include="GalleryConstants.cs" />
     <Compile Include="GlobalSuppressions.cs" />
-    <Compile Include="Helpers\TruncatedStream.cs" />
     <Compile Include="Helpers\GravatarHelper.cs" />
     <Compile Include="Helpers\LicenseExpressionRedirectUrlHelper.cs" />
     <Compile Include="Helpers\ObfuscationHelper.cs" />
-    <Compile Include="Helpers\StreamHelper.cs" />
     <Compile Include="Helpers\TextHelper.cs" />
     <Compile Include="Helpers\ZipArchiveHelpers.cs" />
-    <Compile Include="Helpers\RegexEx.cs" />
     <Compile Include="Helpers\RouteUrlTemplate.cs" />
     <Compile Include="Infrastructure\Lucene\HttpClientWrapper.cs" />
     <Compile Include="Infrastructure\Lucene\IResilientSearchClient.cs" />
@@ -359,7 +434,6 @@
     <Compile Include="Infrastructure\Lucene\SearchClientPolicies.cs" />
     <Compile Include="Infrastructure\Mail\ConfirmationEmailBuilder.cs" />
     <Compile Include="Infrastructure\Mail\EmailMessageFooter.cs" />
-    <Compile Include="Infrastructure\Mail\GalleryEmailRecipientsUtility.cs" />
     <Compile Include="Infrastructure\Mail\Messages\AccountDeleteNoticeMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\ContactOwnersMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\ContactSupportMessage.cs" />
@@ -380,12 +454,6 @@
     <Compile Include="Infrastructure\Mail\Messages\OrganizationTransformRequestMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\PackageAddedWithWarningsMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\PackageDeletedNoticeMessage.cs" />
-    <Compile Include="Infrastructure\Mail\Messages\PackageOwnerAddedMessage.cs" />
-    <Compile Include="Infrastructure\Mail\Messages\PackageOwnerRemovedMessage.cs" />
-    <Compile Include="Infrastructure\Mail\Messages\PackageOwnershipRequestCanceledMessage.cs" />
-    <Compile Include="Infrastructure\Mail\Messages\PackageOwnershipRequestDeclinedMessage.cs" />
-    <Compile Include="Infrastructure\Mail\Messages\PackageOwnershipRequestInitiatedMessage.cs" />
-    <Compile Include="Infrastructure\Mail\Messages\PackageOwnershipRequestMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\PasswordResetInstructionsMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\ReportAbuseMessage.cs" />
     <Compile Include="Infrastructure\Mail\Messages\ReportMyPackageMessage.cs" />
@@ -508,7 +576,7 @@
     <Compile Include="Services\PackageRenameService.cs" />
     <Compile Include="Services\PackageShouldNotBeSignedUserFixableValidationMessage.cs" />
     <Compile Include="Services\PlainTextOnlyValidationMessage.cs" />
-    <Compile Include="Services\RenderedReadMeResult.cs" />
+    <Compile Include="Services\RenderedMarkdownResult.cs" />
     <Compile Include="Services\SearchSideBySideService.cs" />
     <Compile Include="Services\SymbolPackageValidationResult.cs" />
     <Compile Include="Services\FlatContainerContentFileMetadataService.cs" />
@@ -591,10 +659,13 @@
     <Compile Include="Services\PackageValidationResultType.cs" />
     <Compile Include="Services\ReadMeService.cs" />
     <Compile Include="Services\TyposquattingService.cs" />
-    <Compile Include="Services\TyposquattingDistanceCalculation.cs" />
-    <Compile Include="Services\TyposquattingStringNormalization.cs" />
     <Compile Include="Services\UpdateDeprecationError.cs" />
     <Compile Include="Services\ValidationService.cs" />
+    <Compile Include="Strings.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Strings.resx</DependentUpon>
+    </Compile>
     <Compile Include="Telemetry\ClientInformationTelemetryEnricher.cs" />
     <Compile Include="Telemetry\ClientTelemetryPIIProcessor.cs" />
     <Compile Include="Telemetry\CustomerResourceIdEnricher.cs" />
@@ -707,12 +778,15 @@
     <Compile Include="Infrastructure\DependencyResolverServiceProviderAdapter.cs" />
     <Compile Include="Infrastructure\Lucene\CloudDownloadCountServiceRefreshJob.cs" />
     <Compile Include="UrlHelperExtensions.cs" />
+    <Compile Include="UrlHelperWrapper.cs" />
     <Compile Include="ViewModels\AddOrganizationViewModel.cs" />
     <Compile Include="ViewModels\AddPackageOwnerViewModel.cs" />
     <Compile Include="ViewModels\CompositeLicenseExpressionSegmentViewModel.cs" />
     <Compile Include="ViewModels\DeleteOrganizationViewModel.cs" />
     <Compile Include="ViewModels\DeleteUserViewModel.cs" />
     <Compile Include="ViewModels\DisplayLicenseViewModel.cs" />
+    <Compile Include="ViewModels\GitHubPolicyDetailsViewModel.cs" />
+    <Compile Include="ViewModels\GitHubUsageViewModel.cs" />
     <Compile Include="ViewModels\ListCertificateItemViewModel.cs" />
     <Compile Include="ViewModels\GalleryHomeViewModel.cs" />
     <Compile Include="ViewModels\HandleOrganizationMembershipRequestModel.cs" />
@@ -720,9 +794,11 @@
     <Compile Include="ViewModels\ManagePackageViewModel.cs" />
     <Compile Include="ViewModels\BasicUserViewModel.cs" />
     <Compile Include="ViewModels\PendingOrganizationMigrationRequestViewModel.cs" />
+    <Compile Include="ViewModels\TrustedPublisherPolicyDetailsViewModel.cs" />
     <Compile Include="ViewModels\SearchSideBySideViewModel.cs" />
     <Compile Include="ViewModels\SignerViewModel.cs" />
-    <Compile Include="WebRole.cs" />
+    <Compile Include="ViewModels\TrustedPublisherPolicyListViewModel.cs" />
+    <Compile Include="ViewModels\TrustedPublisherPolicyViewModel.cs" />
     <Compile Include="Areas\Admin\AdminAreaRegistration.cs" />
     <Compile Include="Areas\Admin\Controllers\AdminControllerBase.cs" />
     <Compile Include="Areas\Admin\Controllers\HomeController.cs" />
@@ -1292,10 +1368,18 @@
     <Content Include="Areas\Admin\DynamicData\PageTemplates\ListDetails.aspx" />
     <Content Include="Content\admin\SupportRequestStyles.css" />
     <Content Include="Content\fabric.css" />
-    <Content Include="Content\gallery\img\feedback-40x130.png" />
-    <Content Include="Content\gallery\img\feedback.svg" />
+    <Content Include="Content\gallery\img\facebook.svg" />
+    <Content Include="Content\gallery\img\facebook-24x24.png" />
     <Content Include="Content\gallery\img\logo-og-600x600.png" />
     <Content Include="Content\gallery\img\rss-24x24.png" />
+    <Content Include="Content\gallery\img\trusted-publisher-256x256.png" />
+    <Content Include="Content\gallery\img\trusted-publisher.svg" />
+    <Content Include="Content\gallery\img\trusted-publisher-disabled-256x256.png" />
+    <Content Include="Content\gallery\img\trusted-publisher-disabled.svg" />
+    <Content Include="Content\gallery\img\trusted-publisher-temporary-256x256.png" />
+    <Content Include="Content\gallery\img\trusted-publisher-temporary.svg" />
+    <Content Include="Content\gallery\img\x.svg" />
+    <Content Include="Content\gallery\img\x-24x24.png" />
     <Content Include="Content\Images\icons\apiKey.png" />
     <Content Include="Content\Images\icons\apiKeyExpired.png" />
     <Content Include="Content\Images\icons\apiKeyLegacy.png" />
@@ -1305,9 +1389,8 @@
     <Content Include="Content\Images\icons\edit.png" />
     <Content Include="Content\Images\icons\expire.png" />
     <Content Include="Content\Images\icons\regenerate.png" />
-    <Content Include="Content\gallery\css\bootstrap-theme.css" />
-    <Content Include="Content\gallery\css\bootstrap.css" />
     <Content Include="Content\gallery\css\fabric.css" />
+    <Content Include="Content\gallery\css\bootstrap.min.css" />
     <Content Include="Content\gallery\img\api-key-256x256.png" />
     <Content Include="Content\gallery\img\api-key-expired-256x256.png" />
     <Content Include="Content\gallery\img\api-key-expired.svg" />
@@ -1318,15 +1401,22 @@
     <Content Include="Content\gallery\img\api-key.svg" />
     <Content Include="Content\gallery\img\blue-circle-225x225.png" />
     <Content Include="Content\gallery\img\blue-circle.svg" />
+    <Content Include="Content\gallery\img\book-open-icon.svg" />
     <Content Include="Content\gallery\img\circuit-board.svg" />
+    <Content Include="Content\gallery\img\circuit-board-dark-theme.svg" />
+    <Content Include="Content\gallery\img\circuit-board-light-theme.svg" />
     <Content Include="Content\gallery\img\default-package-icon-256x256.png" />
     <Content Include="Content\gallery\img\default-package-icon.svg" />
+    <Content Include="Content\gallery\img\default-package-icon-white.png" />
     <Content Include="Content\gallery\img\dotnet-foundation-42x42.png" />
     <Content Include="Content\gallery\img\dotnet-foundation.svg" />
-    <Content Include="Content\gallery\img\facebook-24x24.png" />
-    <Content Include="Content\gallery\img\facebook.svg" />
     <Content Include="Content\gallery\img\git-32x32.png" />
     <Content Include="Content\gallery\img\git.svg" />
+    <Content Include="Content\gallery\img\git-white.svg" />
+    <Content Include="Content\gallery\img\fuget-32x32.png" />
+    <Content Include="Content\gallery\img\fuget.svg" />
+    <Content Include="Content\gallery\img\nuget-trends.svg" />
+    <Content Include="Content\gallery\img\nuget-trends-32x32.png" />
     <Content Include="Content\gallery\img\github-32x32.png" />
     <Content Include="Content\gallery\img\github.svg" />
     <Content Include="Content\gallery\img\logo-footer-184x57.png" />
@@ -1337,6 +1427,8 @@
     <Content Include="Content\gallery\img\manage-organizations.svg" />
     <Content Include="Content\gallery\img\microsoft-account-24x24.png" />
     <Content Include="Content\gallery\img\microsoft-account.svg" />
+    <Content Include="Content\gallery\img\nuget-lockup-dark-fill.svg" />
+    <Content Include="Content\gallery\img\nuget-lockup-white-fill.svg" />
     <Content Include="Content\gallery\img\orange-circle-225x225.png" />
     <Content Include="Content\gallery\img\orange-circle.svg" />
     <Content Include="Content\gallery\img\purple-circle-225x225.png" />
@@ -1346,11 +1438,9 @@
     <Content Include="Content\gallery\img\reserved-indicator-256x256.png" />
     <Content Include="Content\gallery\img\reserved-indicator-25x25.png" />
     <Content Include="Content\gallery\img\reserved-indicator.svg" />
-    <Content Include="Content\gallery\img\rss-36x36.png" />
+    <Content Include="Content\gallery\img\rocket-icon.svg" />
     <Content Include="Content\gallery\img\rss.svg" />
-    <Content Include="Content\gallery\img\twitter-24x24.png" />
-    <Content Include="Content\gallery\img\twitter-36x36.png" />
-    <Content Include="Content\gallery\img\twitter.svg" />
+    <Content Include="Content\gallery\img\search-icon.svg" />
     <Content Include="Content\themes\custom\images\animated-overlay.gif" />
     <Content Include="Content\themes\custom\images\ui-bg_flat_0_aaaaaa_40x100.png" />
     <Content Include="Content\themes\custom\images\ui-bg_flat_75_ffffff_40x100.png" />
@@ -1396,7 +1486,6 @@
     <Compile Include="Services\NullReportService.cs" />
     <Compile Include="Services\NullStatisticsService.cs" />
     <Compile Include="Services\PackageFileService.cs" />
-    <Compile Include="Services\PackageSearchResults.cs" />
     <Compile Include="Services\JsonAggregateStatsService.cs" />
     <Compile Include="Services\SearchResults.cs" />
     <Compile Include="Services\SqlAggregateStatsService.cs" />
@@ -1442,11 +1531,6 @@
     <Compile Include="Services\IFormsAuthenticationService.cs" />
     <Compile Include="Services\IPackageFileService.cs" />
     <Compile Include="RequestModels\DisplayPackageRequest.cs" />
-    <Compile Include="Strings.Designer.cs">
-      <DependentUpon>Strings.resx</DependentUpon>
-      <AutoGen>True</AutoGen>
-      <DesignTime>True</DesignTime>
-    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\AssemblyInfo.*.cs" />
     <Compile Include="RequestModels\SubmitPackageRequest.cs" />
@@ -1622,6 +1706,30 @@
     <EmbeddedResource Include="Migrations\202006011927336_AddIndexToPackageDependencies.resx">
       <DependentUpon>202006011927336_AddIndexToPackageDependencies.cs</DependentUpon>
     </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202007220027197_AddEmbeddedReadmeTypeColumn.resx">
+      <DependentUpon>202007220027197_AddEmbeddedReadmeTypeColumn.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202104062157118_AddVersionSpecificId.resx">
+      <DependentUpon>202104062157118_AddVersionSpecificId.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202201242159337_AddUserStatusKeyColumn.resx">
+      <DependentUpon>202201242159337_AddUserStatusKeyColumn.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202202010109383_AddCreatedSecurelyToCredentials.resx">
+      <DependentUpon>202202010109383_AddCreatedSecurelyToCredentials.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202205300006043_Int64PackageDownloadCount.resx">
+      <DependentUpon>202205300006043_Int64PackageDownloadCount.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202410302050035_AddFederatedCredentials.resx">
+      <DependentUpon>202410302050035_AddFederatedCredentials.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202506250741123_AddCustomDataToPackageTypes.resx">
+      <DependentUpon>202506250741123_AddCustomDataToPackageTypes.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\202507101756059_AddFederatedCredentialPolicyName.resx">
+      <DependentUpon>202507101756059_AddFederatedCredentialPolicyName.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="OData\QueryAllowed\Data\apiv1packages.json" />
     <EmbeddedResource Include="OData\QueryAllowed\Data\apiv1search.json" />
     <EmbeddedResource Include="OData\QueryAllowed\Data\apiv2getupdates.json" />
@@ -1635,7 +1743,7 @@
     <Content Include="Areas\Admin\Views\Delete\Reflow.cshtml" />
     <Content Include="Areas\Admin\Views\Delete\_ReflowBulk.cshtml" />
     <Content Include="Areas\Admin\Views\Delete\_ReflowBulkConfirm.cshtml" />
-    <Content Include="Areas\Admin\Views\LockPackage\Index.cshtml" />
+    <Content Include="Areas\Admin\Views\Shared\LockIndex.cshtml" />
     <Content Include="App_Data\Files\Content\Login-Discontinuation-Configuration.json" />
     <Content Include="Areas\Admin\Views\DeleteAccount\_DeleteUserAccountForm.cshtml" />
     <Content Include="App_Data\Files\Content\Certificates-Configuration.json" />
@@ -1643,12 +1751,16 @@
     <Content Include="Scripts\d3\LICENSE" />
     <Content Include="Scripts\d3\CHANGES.md" />
     <Content Include="Scripts\d3\API.md" />
-    <Content Include="NuGetGallery.dll.config">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
     <Content Include="Areas\Admin\Views\Revalidation\Index.cshtml" />
     <Content Include="App_Data\Files\Content\Symbols-Configuration.json" />
+    <Content Include="Scripts\gallery\idle-timer.js" />
     <Content Include="Scripts\gallery\instrumentation.js" />
+    <Content Include="Scripts\gallery\knockout-3.5.1.js" />
+    <Content Include="Scripts\gallery\moment-2.29.4.js" />
+    <Content Include="Scripts\gallery\page-trusted-publishing.js" />
+    <Content Include="Scripts\gallery\page-downloads.js" />
+    <Content Include="Scripts\gallery\page-list-packages.js" />
+    <Content Include="Scripts\gallery\syntaxhighlight.js" />
     <Content Include="Views\Shared\SiteMenu.cshtml">
       <SubType>Code</SubType>
     </Content>
@@ -1701,6 +1813,8 @@
     <Content Include="Views\Users\_DeleteUserAccountForm.cshtml" />
     <Content Include="Views\Organizations\_OrganizationMembersListForDeletedAccount.cshtml" />
     <Content Include="Views\Shared\_AccountCertificates.cshtml" />
+    <Content Include="Views\Packages\_SupportedFrameworksTable.cshtml" />
+    <Content Include="Views\Packages\_SupportedFrameworksBadges.cshtml" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="App_Offline-Planned.htm" />
@@ -1774,6 +1888,7 @@
     <EmbeddedResource Include="Infrastructure\Elmah.SqlServer.sql" />
     <EmbeddedResource Include="Infrastructure\AddPackageLicenseReport.sql" />
     <Content Include="Public\robots.txt" />
+    <Content Include="App_Data\Files\Content\Trusted-Image-Domains.json" />
     <Content Include="App_Data\Files\Content\Typosquatting-Configuration.json" />
     <Content Include="App_Data\Files\Content\flags.json" />
     <Content Include="Areas\Admin\Views\DeleteAccount\DeleteOrganizationAccount.cshtml" />
@@ -1799,10 +1914,8 @@
     <Content Include="Scripts\gallery\jquery-ui-1.10.3.js" />
     <Content Include="Scripts\gallery\jquery.validate-1.16.0.js" />
     <Content Include="Scripts\gallery\jquery.validate.unobtrusive-3.2.6.js" />
-    <Content Include="Scripts\gallery\knockout-3.4.2.js" />
     <Content Include="Scripts\gallery\knockout-projections.js" />
     <Content Include="Scripts\gallery\md5.js" />
-    <Content Include="Scripts\gallery\moment-2.18.1.js" />
     <Content Include="Scripts\gallery\page-about.js" />
     <Content Include="Scripts\gallery\page-account.js" />
     <Content Include="Scripts\gallery\page-add-organization.js" />
@@ -1868,6 +1981,8 @@
     <Content Include="Views\Api\HealthProbeApi.cshtml" />
     <Content Include="Views\Pages\_Enable2FA.cshtml" />
     <Content Include="Views\Pages\SimulateError.cshtml" />
+    <Content Include="Views\Packages\_DisplayPackageRenames.cshtml" />
+    <Content Include="Views\Packages\_DisplayPackageVulnerabilities.cshtml" />
   </ItemGroup>
   <ItemGroup>
     <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />
@@ -1998,8 +2113,8 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Strings.resx">
       <Generator>PublicResXFileCodeGenerator</Generator>
-      <LastGenOutput>Strings.Designer.cs</LastGenOutput>
       <SubType>Designer</SubType>
+      <LastGenOutput>Strings.Designer.cs</LastGenOutput>
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
@@ -2027,15 +2142,66 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Areas\Admin\DynamicData\CustomPages\" />
-    <Folder Include="Areas\Admin\Views\Shared\" />
     <Folder Include="Authentication\Providers\" />
     <Folder Include="Infrastructure\Authentication\" />
     <Folder Include="Security\" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\NuGet.Services.Configuration\NuGet.Services.Configuration.csproj">
+      <Project>{f2e4c9f8-d0e1-4ab4-887d-0af2e668981e}</Project>
+      <Name>NuGet.Services.Configuration</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Contracts\NuGet.Services.Contracts.csproj">
+      <Project>{b3b7be66-86c2-4ab9-8315-021a22b104ae}</Project>
+      <Name>NuGet.Services.Contracts</Name>
+    </ProjectReference>
     <ProjectReference Include="..\NuGet.Services.Entities\NuGet.Services.Entities.csproj">
       <Project>{6262f4fc-29be-4226-b676-db391c89d396}</Project>
       <Name>NuGet.Services.Entities</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.FeatureFlags\NuGet.Services.FeatureFlags.csproj">
+      <Project>{228091e8-e1c3-4ffc-bd49-453a84da2c38}</Project>
+      <Name>NuGet.Services.FeatureFlags</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.KeyVault\NuGet.Services.KeyVault.csproj">
+      <Project>{5dfc03f8-3b75-4896-bc7f-0745f7070066}</Project>
+      <Name>NuGet.Services.KeyVault</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Licenses\NuGet.Services.Licenses.csproj">
+      <Project>{0db9da01-265d-47f7-b717-f52917042833}</Project>
+      <Name>NuGet.Services.Licenses</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Logging\NuGet.Services.Logging.csproj">
+      <Project>{9f174d90-353d-4365-9dfb-a95986d4a6ba}</Project>
+      <Name>NuGet.Services.Logging</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Messaging.Email\NuGet.Services.Messaging.Email.csproj">
+      <Project>{178f8947-f521-4d0d-871b-ccd26393dbc7}</Project>
+      <Name>NuGet.Services.Messaging.Email</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Messaging\NuGet.Services.Messaging.csproj">
+      <Project>{259af5a7-3928-4942-a1c7-850d845f5d4a}</Project>
+      <Name>NuGet.Services.Messaging</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Owin\NuGet.Services.Owin.csproj">
+      <Project>{56d69b64-c806-42fa-9aea-baa8d3ce97b4}</Project>
+      <Name>NuGet.Services.Owin</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.ServiceBus\NuGet.Services.ServiceBus.csproj">
+      <Project>{8e69eee6-2bdc-48e5-a4ab-32f44ebb2422}</Project>
+      <Name>NuGet.Services.ServiceBus</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Sql\NuGet.Services.Sql.csproj">
+      <Project>{692cdff5-6301-41bd-b06f-89deee43e23e}</Project>
+      <Name>NuGet.Services.Sql</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Validation.Issues\NuGet.Services.Validation.Issues.csproj">
+      <Project>{31c526dc-c8bd-4863-b66f-2fb1c4e440d0}</Project>
+      <Name>NuGet.Services.Validation.Issues</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\NuGet.Services.Validation\NuGet.Services.Validation.csproj">
+      <Project>{14307f06-bdcc-4026-a7f9-09cd032d4b7b}</Project>
+      <Name>NuGet.Services.Validation</Name>
     </ProjectReference>
     <ProjectReference Include="..\NuGetGallery.Core\NuGetGallery.Core.csproj">
       <Project>{097b2cdd-9623-4c34-93c2-d373d51f5b4e}</Project>
@@ -2047,272 +2213,111 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Autofac.Extensions.DependencyInjection">
-      <Version>4.3.1</Version>
-    </PackageReference>
-    <PackageReference Include="Markdig.Signed">
-      <Version>0.15.4</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection">
-      <Version>2.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Http">
-      <Version>2.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Http.Polly">
-      <Version>2.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.AnglicanGeek.MarkdownMailer">
-      <Version>1.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="Autofac">
-      <Version>4.6.2</Version>
-    </PackageReference>
-    <PackageReference Include="Autofac.Mvc5">
-      <Version>4.0.2</Version>
-    </PackageReference>
-    <PackageReference Include="Autofac.Mvc5.Owin">
-      <Version>4.0.1</Version>
-    </PackageReference>
-    <PackageReference Include="Autofac.Owin">
-      <Version>4.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="Autofac.WebApi2">
-      <Version>4.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="CommonMark.NET">
-      <Version>0.15.1</Version>
-    </PackageReference>
-    <PackageReference Include="d3">
-      <Version>5.4.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.DynamicData.EFCodeFirstProvider">
-      <Version>0.3.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.elmah.corelibrary">
-      <Version>1.2.2</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.elmah.sqlserver">
-      <Version>1.2.2</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.elmah">
-      <Version>1.2.2</Version>
-    </PackageReference>
-    <PackageReference Include="EntityFramework">
-      <Version>6.4.0-preview3-19553-01</Version>
-    </PackageReference>
-    <PackageReference Include="Knockout.Mapping">
-      <Version>2.4.0</Version>
-    </PackageReference>
-    <PackageReference Include="knockoutjs">
-      <Version>2.2.1</Version>
-    </PackageReference>
-    <PackageReference Include="Lucene.Net">
-      <Version>3.0.3</Version>
-    </PackageReference>
-    <PackageReference Include="Lucene.Net.Contrib">
-      <Version>3.0.3</Version>
-    </PackageReference>
-    <PackageReference Include="MicroBuild.Core">
-      <Version>0.3.0</Version>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.ApplicationInsights.TraceListener">
-      <Version>2.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.ApplicationInsights.Web">
-      <Version>2.12.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.DynamicData.EFProvider">
-      <Version>6.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.Identity.Core">
-      <Version>1.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.Mvc">
-      <Version>5.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.Razor">
-      <Version>3.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.Web.Optimization">
-      <Version>1.1.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebApi.Client">
-      <Version>5.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebApi.Core">
-      <Version>5.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebApi.MessageHandlers.Compression.StrongName">
-      <Version>1.3.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebApi.OData">
-      <Version>5.5.1</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebApi.WebHost">
-      <Version>5.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebHelpers">
-      <Version>3.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebPages">
-      <Version>3.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebPages.Data">
-      <Version>3.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNet.WebPages.WebData">
-      <Version>3.2.3</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.Cryptography.Internal">
-      <Version>1.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.Cryptography.KeyDerivation">
-      <Version>1.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Azure.KeyVault">
-      <Version>1.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Azure.KeyVault.Core">
-      <Version>1.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Bcl.Compression">
-      <Version>3.9.85</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Data.Services">
-      <Version>5.8.4</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Logging">
-      <Version>2.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions">
-      <Version>2.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.IdentityModel.Clients.ActiveDirectory">
-      <Version>5.2.6</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Net.Http">
-      <Version>2.2.29</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Owin">
-      <Version>4.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Owin.Host.SystemWeb">
-      <Version>4.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Owin.Security">
-      <Version>4.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Owin.Security.Cookies">
-      <Version>4.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Owin.Security.MicrosoftAccount">
-      <Version>4.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Owin.Security.OpenIdConnect">
-      <Version>4.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Web.Infrastructure">
-      <Version>1.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Web.Xdt">
-      <Version>2.1.2</Version>
-    </PackageReference>
-    <PackageReference Include="Microsoft.WindowsAzure.ConfigurationManager">
-      <Version>3.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Modernizr">
-      <Version>2.8.3</Version>
-    </PackageReference>
-    <PackageReference Include="Moment.js">
-      <Version>2.24.0</Version>
-    </PackageReference>
-    <PackageReference Include="MvcTreeView">
-      <Version>1.4.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.Configuration">
-      <Version>5.0.0-preview1.5665</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.Protocol">
-      <Version>5.0.0-preview1.5665</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.Services.Licenses">
-      <Version>2.74.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.Services.Owin">
-      <Version>2.74.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.Services.Sql">
-      <Version>2.74.0</Version>
-    </PackageReference>
-    <PackageReference Include="Owin">
-      <Version>1.0.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.QueryInterceptor">
-      <Version>0.1.4237.2400</Version>
-    </PackageReference>
-    <PackageReference Include="RouteMagic">
-      <Version>1.1.3</Version>
-    </PackageReference>
-    <PackageReference Include="SharpZipLib">
-      <Version>1.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="Strathweb.CacheOutput.WebApi2.StrongName">
-      <Version>0.9.0</Version>
-    </PackageReference>
-    <PackageReference Include="System.Diagnostics.Debug">
-      <Version>4.3.0</Version>
-    </PackageReference>
-    <PackageReference Include="System.Linq.Expressions">
-      <Version>4.3.0</Version>
-    </PackageReference>
-    <PackageReference Include="System.Net.Http">
-      <Version>4.3.4</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.WebActivator">
-      <Version>1.4.4</Version>
-    </PackageReference>
-    <PackageReference Include="WebActivatorEx">
-      <Version>2.0.6</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.WebBackgrounder.EntityFramework">
-      <Version>0.1.0</Version>
-    </PackageReference>
-    <PackageReference Include="NuGet.StrongName.WebBackgrounder">
-      <Version>0.2.0</Version>
-    </PackageReference>
-    <PackageReference Include="WebGrease">
-      <Version>1.6.0</Version>
-    </PackageReference>
-    <PackageReference Include="WindowsAzure.Caching">
-      <Version>1.7.0</Version>
-    </PackageReference>
-    <PackageReference Include="WindowsAzure.ServiceBus">
-      <Version>4.1.3</Version>
-    </PackageReference>
-    <PackageReference Include="WindowsAzure.Storage">
-      <Version>9.3.3</Version>
-    </PackageReference>
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Http.Polly" />
+    <PackageReference Include="NuGet.StrongName.AnglicanGeek.MarkdownMailer" />
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="Autofac.Mvc5" />
+    <PackageReference Include="Autofac.Mvc5.Owin" />
+    <PackageReference Include="Autofac.Owin" />
+    <PackageReference Include="Autofac.WebApi2" />
+    <PackageReference Include="CommonMark.NET" />
+    <PackageReference Include="d3" />
+    <PackageReference Include="NuGet.StrongName.DynamicData.EFCodeFirstProvider" />
+    <PackageReference Include="NuGet.StrongName.elmah.sqlserver" />
+    <PackageReference Include="NuGet.StrongName.elmah" />
+    <PackageReference Include="EntityFramework" />
+    <PackageReference Include="HtmlSanitizer" />
+    <PackageReference Include="Lucene.Net" />
+    <PackageReference Include="Lucene.Net.Contrib" />
+    <PackageReference Include="Microsoft.ApplicationInsights.TraceListener" />
+    <PackageReference Include="Microsoft.ApplicationInsights.Web" />
+    <PackageReference Include="Microsoft.AspNet.DynamicData.EFProvider" />
+    <PackageReference Include="Microsoft.AspNet.Identity.Core" />
+    <PackageReference Include="Microsoft.AspNet.Razor" />
+    <PackageReference Include="Microsoft.AspNet.Web.Optimization" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.Client" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.Core" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.MessageHandlers.Compression.StrongName" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.OData" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.WebHost" />
+    <PackageReference Include="Microsoft.AspNet.WebHelpers" />
+    <PackageReference Include="Microsoft.AspNet.WebPages" />
+    <PackageReference Include="Microsoft.AspNet.WebPages.Data" />
+    <PackageReference Include="Microsoft.AspNet.WebPages.WebData" />
+    <PackageReference Include="Microsoft.AspNetCore.Cryptography.Internal" />
+    <PackageReference Include="Microsoft.Bcl.Compression" />
+    <PackageReference Include="Microsoft.Data.Services" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Net.Http" />
+    <PackageReference Include="Microsoft.Web.Infrastructure" />
+    <PackageReference Include="Microsoft.Web.Xdt" />
+    <PackageReference Include="Modernizr" />
+    <PackageReference Include="Moment.js" />
+    <PackageReference Include="MvcTreeView" />
+    <PackageReference Include="Owin" />
+    <PackageReference Include="NuGet.StrongName.QueryInterceptor" />
+    <PackageReference Include="RouteMagic" />
+    <PackageReference Include="SharpZipLib" />
+    <PackageReference Include="Strathweb.CacheOutput.WebApi2.StrongName" />
+    <PackageReference Include="System.Data.SqlClient" />
+    <PackageReference Include="System.Diagnostics.Debug" />
+    <PackageReference Include="System.Linq.Expressions" />
+    <PackageReference Include="System.Net.Http" />
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="NuGet.StrongName.WebActivator" />
+    <PackageReference Include="WebActivatorEx" />
+    <PackageReference Include="NuGet.StrongName.WebBackgrounder.EntityFramework" />
+    <PackageReference Include="WebGrease" />
+    <PackageReference Include="WindowsAzure.Caching" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Views\Packages\_DisplayPackageRenames.cshtml" />
+    <Content Include="App_Data\Files\Content\Cache-Configuration.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="App_Data\Files\Content\Query-Hint-Configuration.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\UpdateListed\Index.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\PackageOwnership\Index.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\PackageOwnership\ValidateInput.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\PackageOwnership\_HiddenForm.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\PasswordAuthentication\Index.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\ChangeUsername\Index.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\PopularityTransfer\Index.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\CorrectIsLatest\Index.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Views\Shared\_AccountChangeTheme.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Areas\Admin\Views\FederatedCredentials\Index.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Views\Users\TrustedPublishing.cshtml" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
   </PropertyGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
-  <PropertyGroup>
-    <SignPath>..\..\build</SignPath>
-    <SignPath Condition="'$(BUILD_SOURCESDIRECTORY)' != ''">$(BUILD_SOURCESDIRECTORY)\build</SignPath>
-    <SignPath Condition="'$(NuGetBuildPath)' != ''">$(NuGetBuildPath)</SignPath>
-    <SignType Condition="'$(SignType)' == ''">none</SignType>
-  </PropertyGroup>
-  <Import Project="$(SignPath)\sign.targets" Condition="Exists('$(SignPath)\sign.targets')" />
-  <Import Project="$(SignPath)\sign.microbuild.targets" Condition="Exists('$(SignPath)\sign.microbuild.targets')" />
-  <Import Project="$(NuGetBuildExtensions)" Condition="'$(NuGetBuildExtensions)' != '' And Exists('$(NuGetBuildExtensions)')" />
   <Import Project="$(VSToolsPath)\WebApplications\Microsoft.WebApplication.targets" Condition="'$(VSToolsPath)' != ''" />
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v10.0\WebApplications\Microsoft.WebApplication.targets" Condition="false" />
   <Target Name="MvcBuildViews" AfterTargets="AfterBuild" Condition="'$(MvcBuildViews)'=='true'">
@@ -2338,8 +2343,7 @@
   </ProjectExtensions>
   <PropertyGroup>
     <PreBuildEvent>
-      copy "$(ProjectDir)..\Bootstrap\dist\css\bootstrap.css" "$(ProjectDir)Content\gallery\css" &gt;NUL
-      copy "$(ProjectDir)..\Bootstrap\dist\css\bootstrap-theme.css" "$(ProjectDir)Content\gallery\css" &gt;NUL
+      copy "$(ProjectDir)..\Bootstrap\dist\css\bootstrap.min.css" "$(ProjectDir)Content\gallery\css" &gt;NUL
       copy "$(ProjectDir)..\Bootstrap\dist\js\bootstrap.js" "$(ProjectDir)Scripts\gallery" &gt;NUL
     </PreBuildEvent>
   </PropertyGroup>

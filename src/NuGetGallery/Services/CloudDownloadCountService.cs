@@ -7,9 +7,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
-using Microsoft.WindowsAzure.Storage.RetryPolicies;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -25,24 +24,26 @@ namespace NuGetGallery
         private const string TelemetryOriginForRefreshMethod = "CloudDownloadCountService.Refresh";
 
         private readonly ITelemetryService _telemetryService;
-        private readonly string _connectionString;
-        private readonly bool _readAccessGeoRedundant;
+        private readonly Func<ICloudBlobClient> _cloudBlobClientFactory;
+        private readonly ILogger<CloudDownloadCountService> _logger;
 
         private readonly object _refreshLock = new object();
         private bool _isRefreshing;
 
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, int>> _downloadCounts
-            = new ConcurrentDictionary<string, ConcurrentDictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _downloadCounts
+            = new ConcurrentDictionary<string, ConcurrentDictionary<string, long>>(StringComparer.OrdinalIgnoreCase);
 
-        public CloudDownloadCountService(ITelemetryService telemetryService, string connectionString, bool readAccessGeoRedundant)
+        public CloudDownloadCountService(
+            ITelemetryService telemetryService,
+            Func<ICloudBlobClient> cloudBlobClientFactory,
+            ILogger<CloudDownloadCountService> logger)
         {
             _telemetryService = telemetryService ?? throw new ArgumentNullException(nameof(telemetryService));
-
-            _connectionString = connectionString;
-            _readAccessGeoRedundant = readAccessGeoRedundant;
+            _cloudBlobClientFactory = cloudBlobClientFactory ?? throw new ArgumentNullException(nameof(cloudBlobClientFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public bool TryGetDownloadCountForPackageRegistration(string id, out int downloadCount)
+        public bool TryGetDownloadCountForPackageRegistration(string id, out long downloadCount)
         {
             if (string.IsNullOrEmpty(id))
             {
@@ -61,7 +62,7 @@ namespace NuGetGallery
             return false;
         }
         
-        public bool TryGetDownloadCountForPackage(string id, string version, out int downloadCount)
+        public bool TryGetDownloadCountForPackage(string id, string version, out long downloadCount)
         {
             if (string.IsNullOrEmpty(id))
             {
@@ -85,7 +86,7 @@ namespace NuGetGallery
             return false;
         }
 
-        public void Refresh()
+        public async Task RefreshAsync()
         {
             bool shouldRefresh = false;
             lock (_refreshLock)
@@ -102,9 +103,9 @@ namespace NuGetGallery
                 try
                 {
                     var stopwatch = Stopwatch.StartNew();
-                    RefreshCore();
+                    await RefreshCoreAsync();
                     stopwatch.Stop();
-                    _telemetryService.TrackDownloadJsonRefreshDuration(stopwatch.ElapsedMilliseconds);
+                    _telemetryService.TrackDownloadJsonRefreshDuration(TimeSpan.FromMilliseconds(stopwatch.ElapsedMilliseconds));
 
                 }
                 catch (WebException ex)
@@ -137,7 +138,7 @@ namespace NuGetGallery
         /// <summary>
         /// This method is added for unit testing purposes.
         /// </summary>
-        protected virtual int CalculateSum(ConcurrentDictionary<string, int> versions)
+        protected virtual long CalculateSum(ConcurrentDictionary<string, long> versions)
         {
             return versions.Sum(kvp => kvp.Value);
         }
@@ -146,24 +147,22 @@ namespace NuGetGallery
         /// This method is added for unit testing purposes. It can return a null stream if the blob does not exist
         /// and assumes the caller will properly dispose of the returned stream.
         /// </summary>
-        protected virtual Stream GetBlobStream()
+        protected virtual async Task<Stream> GetBlobStreamAsync()
         {
             var blob = GetBlobReference();
-            if (blob == null)
-            {
-                return null;
-            }
-
-            return blob.OpenRead();
+            return await blob.OpenReadIfExistsAsync();
         }
 
-        private void RefreshCore()
+        private async Task RefreshCoreAsync()
         {
             try
             {
+                int totalIds = 0;
+                int totalVersions = 0;
+
                 // The data in downloads.v1.json will be an array of Package records - which has Id, Array of Versions and download count.
                 // Sample.json : [["AutofacContrib.NSubstitute",["2.4.3.700",406],["2.5.0",137]],["Assman.Core",["2.0.7",138]]....
-                using (var blobStream = GetBlobStream())
+                using (var blobStream = await GetBlobStreamAsync())
                 {
                     if (blobStream == null)
                     {
@@ -174,15 +173,15 @@ namespace NuGetGallery
                     {
                         try
                         {
-                            jsonReader.Read();
+                            await jsonReader.ReadAsync();
 
-                            while (jsonReader.Read())
+                            while (await jsonReader.ReadAsync())
                             {
                                 try
                                 {
                                     if (jsonReader.TokenType == JsonToken.StartArray)
                                     {
-                                        JToken record = JToken.ReadFrom(jsonReader);
+                                        JToken record = await JToken.ReadFromAsync(jsonReader);
                                         string id = record[0].ToString().ToLowerInvariant();
 
                                         // The second entry in each record should be an array of versions, if not move on to next entry.
@@ -192,16 +191,19 @@ namespace NuGetGallery
                                             continue;
                                         }
 
+                                        ++totalIds;
+
                                         var versions = _downloadCounts.GetOrAdd(
                                             id,
-                                            _ => new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+                                            _ => new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase));
 
                                         foreach (JToken token in record)
                                         {
                                             if (token != null && token.Count() == 2)
                                             {
                                                 var version = token[0].ToString();
-                                                var downloadCount = token[1].ToObject<int>();
+                                                var downloadCount = token[1].ToObject<long>();
+                                                ++totalVersions;
 
                                                 if (versions.ContainsKey(version) && downloadCount < versions[version])
                                                 {
@@ -235,6 +237,9 @@ namespace NuGetGallery
                         }
                     }
                 }
+
+                _telemetryService.TrackDownloadJsonTotalPackageIds(totalIds);
+                _telemetryService.TrackDownloadJsonTotalPackageVersions(totalVersions);
             }
             catch (Exception ex)
             {
@@ -246,23 +251,15 @@ namespace NuGetGallery
             }
         }
 
-        private CloudBlockBlob GetBlobReference()
+        private ISimpleCloudBlob GetBlobReference()
         {
-            var storageAccount = CloudStorageAccount.Parse(_connectionString);
-            var blobClient = storageAccount.CreateCloudBlobClient();
-
-            if (_readAccessGeoRedundant)
-            {
-                blobClient.DefaultRequestOptions.LocationMode = LocationMode.PrimaryThenSecondary;
-            }
+            var blobClient = _cloudBlobClientFactory();
 
             var container = blobClient.GetContainerReference(StatsContainerName);
-            var blob = container.GetBlockBlobReference(DownloadCountBlobName);
+            var blob = container.GetBlobReference(DownloadCountBlobName);
 
-            if (!blob.Exists())
-            {
-                return null;
-            }
+            _logger.LogInformation("Cloud download statistics source: {BlobUri}", blob.Uri);
+
             return blob;
         }
     }

@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System.Collections.Generic;
@@ -8,6 +8,12 @@ namespace NuGetGallery
 {
     public interface IFeatureFlagService
     {
+        /// <summary>
+        /// Whether downloads.v1.json hould be pulled from primary or secondary location.
+        /// If true, the secondary location will be used to download downloads.v1.json.
+        /// </summary>
+        bool IsAlternateStatisticsSourceEnabled();
+
         /// <summary>
         /// Whether account deletes are performed asychronously or not.
         /// If true, account deletes will be attempted to be performed asychronously
@@ -42,6 +48,12 @@ namespace NuGetGallery
         bool IsPackagesAtomFeedEnabled();
 
         /// <summary>
+        /// Whether the packages Atom feed xml file returns a combined authors list. If true, the feed will
+        /// return a single author entry for all package authors.
+        /// </summary>
+        bool IsPackagesAtomFeedCombinedAuthorsEnabled();
+
+        /// <summary>
         /// Whether or not the user can manage their package's deprecation state.
         /// </summary>
         bool IsManageDeprecationEnabled(User user, PackageRegistration registration);
@@ -55,6 +67,31 @@ namespace NuGetGallery
         /// Whether or not the user can manage their package's deprecation state through the API.
         /// </summary>
         bool IsManageDeprecationApiEnabled(User user);
+
+        /// <summary>
+        /// Whether or not a package owner can view vulnerability advisory information on their package.
+        /// </summary>
+        bool IsDisplayVulnerabilitiesEnabled();
+
+        /// <summary>
+        /// Whether or not a package owner can view vulnerability advisory information on the Manage Packages page.
+        /// </summary>
+        bool IsManagePackagesVulnerabilitiesEnabled();
+
+        /// <summary>
+        /// Whether or not a fuget.org link is visible on a package's details page.
+        /// </summary>
+        bool IsDisplayFuGetLinksEnabled();
+
+        /// <summary>
+        /// Whether or not a nugettrends.com link is visible on a package's details page.
+        /// </summary>
+        bool IsDisplayNuGetTrendsLinksEnabled();
+
+        /// <summary>
+        /// Whether or not a nuget.info (NuGet Package Explorer) link is visible on a package's details page.
+        /// </summary>
+        bool IsDisplayNuGetPackageExplorerLinkEnabled();
 
         /// <summary>
         /// Whether the user is allowed to publish packages with an embedded icon.
@@ -79,6 +116,14 @@ namespace NuGetGallery
         /// <param name="user">The user to test for the Flight</param>
         /// <returns>Whether or not the Flight is enabled for the user</returns>
         bool IsGitHubUsageEnabled(User user);
+
+        /// <summary>
+        /// Whether a user can see the "Advanced Search" panel in the packages list view as well as use the 
+        /// advanced search request parameters
+        /// </summary>
+        /// <param name="user">The user to test for the Flight</param>
+        /// <returns>Whether or not the Flight is enabled for the user</returns>
+        bool IsAdvancedSearchEnabled(User user);
 
         /// <summary>
         /// Whether a user can see the "Package Dependents" section in a package's display page. Also, no
@@ -130,13 +175,206 @@ namespace NuGetGallery
         bool IsGet2FADismissFeedbackEnabled();
 
         /// <summary>
-        /// Whether we should enable the Usabilla feedback button on every page.
-        /// </summary>
-        bool IsUsabillaButtonEnabledOnEveryPage();
-
-        /// <summary>
         /// Whether the user is able to see or manage the package renames information.
         /// </summary>
         bool IsPackageRenamesEnabled(User user);
+
+        /// <summary>
+        /// Whether we're using pattern set based TFM determination on ingested packages
+        /// </summary>
+        bool ArePatternSetTfmHeuristicsEnabled();
+
+        /// <summary>
+        /// Whether the user is able to publish the package with an embedded readme file.
+        /// </summary>
+        bool AreEmbeddedReadmesEnabled(User user);
+
+        /// <summary>
+        /// Whether the /Packages() endpoint is enabled for the V1 OData API.
+        /// </summary>
+        bool IsODataV1GetAllEnabled();
+
+        /// <summary>
+        /// Whether the /Packages()/$count endpoint is enabled for the V1 OData API.
+        /// </summary>
+        bool IsODataV1GetAllCountEnabled();
+
+        /// <summary>
+        /// Whether the /Packages(Id=,Version=) endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1GetSpecificNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById() endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1FindPackagesByIdNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById()/$count endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1FindPackagesByIdCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Search() endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1SearchNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Search()/$count endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1SearchCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Packages() endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2GetAllNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Packages()/$count endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2GetAllCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Packages(Id=,Version=) endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2GetSpecificNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById() endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2FindPackagesByIdNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById()/$count endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2FindPackagesByIdCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Search() endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2SearchNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether rendering licence Markdown content to HTML is enabled
+        /// </summary>
+        bool IsLicenseMdRenderingEnabled(User user);
+
+        /// <summary>
+        /// Whether the /Search()/$count endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2SearchCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the online safety changes to the report abuse form have been enabled
+        /// </summary>
+        bool IsShowReportAbuseSafetyChangesEnabled();
+
+        /// <summary>
+        /// Whether online safety categories are available to content owned by at least one Microsoft Entra ID-authenticated account
+        /// </summary>
+        bool IsAllowAadContentSafetyReportsEnabled();
+
+        /// <summary>
+        /// Whether rendering Markdown content to HTML using Markdig is enabled
+        /// </summary>
+        bool IsMarkdigMdRenderingEnabled();
+
+        /// <summary>
+        /// Whether rendering Markdown fenced code with syntax highlighting
+        /// </summary>
+        bool IsMarkdigMdSyntaxHighlightEnabled();
+
+        /// <summary>
+        /// Whether the new warning of the verfiy metadata when upload package is enabled.
+        /// </summary>
+        bool IsDisplayUploadWarningV2Enabled(User user);
+
+        /// <summary>
+        /// Whether the new warning of the missing readme is displayed to package authors
+        /// </summary>
+        bool IsDisplayPackageReadmeWarningEnabled(User user);
+
+        /// <summary>
+        /// Whether or not the user can delete a package through the API.
+        /// </summary>
+        bool IsDeletePackageApiEnabled(User user);
+
+        /// <summary>
+        /// Whether the allowlist is enabled for checking the image sources
+        /// </summary>
+        bool IsImageAllowlistEnabled();
+
+        /// <summary>
+        /// Whether or not display the banner on nuget.org
+        /// </summary>
+        bool IsDisplayBannerEnabled();
+
+        /// <summary>
+        /// Whether or not display target framework badges and table on nuget.org
+        /// </summary>
+        bool IsDisplayTargetFrameworkEnabled(User user);
+
+        /// <summary>
+        /// Whether or not to compute backend operations for target framework. This flag is overridden by <see cref="IsDisplayTargetFrameworkEnabled"/> if that flag is true.
+        /// </summary>
+        bool IsComputeTargetFrameworkEnabled();
+
+        /// <summary>
+        /// Whether or not recent packages has no index applied to block search engine indexing.
+        /// </summary>
+        bool IsRecentPackagesNoIndexEnabled();
+
+        /// <summary>
+        /// Whether or not to enforce 2FA for new external account link or replacement.
+        /// </summary>
+        bool IsNewAccount2FAEnforcementEnabled();
+
+        /// <summary>
+        /// Whether or not NuGet.org password login is supported. NuGet.org accounts in the <see cref="LoginDiscontinuationConfiguration.ExceptionsForEmailAddresses"/> will always be supported.
+        /// </summary>
+        bool IsNuGetAccountPasswordLoginEnabled();
+
+        /// <summary>
+        /// Whether or not to allow filtering by frameworks on NuGet.org search
+        /// </summary>
+        bool IsFrameworkFilteringEnabled(User user);
+
+        /// <summary>
+        /// Whether or not to display TFM badges in search results
+        /// </summary>
+        bool IsDisplayTfmBadgesEnabled(User user);
+
+        /// <summary>
+        /// Whether or not to allow filtering by frameworks on NuGet.org search
+        /// </summary>
+        bool IsAdvancedFrameworkFilteringEnabled(User user);
+
+        /// <summary>
+        /// Whether or not the user specified in a package owner scope can use federated credentials,
+        /// a.k.a. Entra ID. When enabled, this controls both the ability to create federated credential
+        /// policies and the ability to exchange external tokens for NuGet API keys during package operations.
+        /// </summary>
+        bool CanUseFederatedCredentials(User user);
+
+        /// <summary>
+        /// Whether or not the user can access trusted publishing functionality, e.g. GitHub Actions workflows.
+        /// When enabled, this controls both the ability to create Trusted Publishing policies and the ability
+        /// to exchange external tokens for NuGet API keys during package operations.
+        /// </summary>
+        bool IsTrustedPublishingEnabled(User user);
+
+        /// <summary>
+        /// Whether or not the first iteration of the profile load optimization is enabled.
+        /// </summary>
+        bool IsProfileLoadOptimizationEnabled();
+
+        /// <summary>
+        /// Whether or not the second iteration of the profile load optimization is enabled.
+        /// </summary>
+        bool IsProfileLoadOptimizationV2Enabled();
+
+        bool IsMcpServerPackageFilteringEnabled();
+
+        bool IsMcpServerPackageDisplayEnabled();
     }
 }

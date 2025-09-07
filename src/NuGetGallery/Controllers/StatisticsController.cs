@@ -8,24 +8,26 @@ using System.Threading.Tasks;
 using System.Web.Mvc;
 using System.Web.UI;
 using NuGet.Versioning;
+using NuGetGallery.Configuration;
 
 namespace NuGetGallery
 {
     public partial class StatisticsController
         : AppController
     {
-        private const string AllPackageSet = "all";
-
         private readonly IStatisticsService _statisticsService = null;
         private readonly IAggregateStatsService _aggregateStatsService = null;
+        private readonly IAppConfiguration _appConfiguration = null;
 
-        private static readonly string[] PackageDownloadsByVersionDimensions = new[] {
+        private static readonly string[] PackageDownloadsByVersionDimensions = new[]
+        {
             GalleryConstants.StatisticsDimensions.Version,
             GalleryConstants.StatisticsDimensions.ClientName,
             GalleryConstants.StatisticsDimensions.ClientVersion,
         };
 
-        private static readonly string[] PackageDownloadsDetailDimensions = new[] {
+        private static readonly string[] PackageDownloadsDetailDimensions = new[]
+        {
             GalleryConstants.StatisticsDimensions.ClientName,
             GalleryConstants.StatisticsDimensions.ClientVersion,
         };
@@ -42,10 +44,14 @@ namespace NuGetGallery
             _aggregateStatsService = null;
         }
 
-        public StatisticsController(IStatisticsService statisticsService, IAggregateStatsService aggregateStatsService)
+        public StatisticsController(
+            IStatisticsService statisticsService,
+            IAggregateStatsService aggregateStatsService,
+            IAppConfiguration appConfiguration)
         {
             _statisticsService = statisticsService;
             _aggregateStatsService = aggregateStatsService;
+            _appConfiguration = appConfiguration;
         }
 
         [AcceptVerbs(HttpVerbs.Get | HttpVerbs.Head)]
@@ -67,7 +73,7 @@ namespace NuGetGallery
 
         //
         // GET: /stats
-
+        [HttpGet]
         public virtual async Task<ActionResult> Index()
         {
             if (_statisticsService == NullStatisticsService.Instance)
@@ -103,7 +109,7 @@ namespace NuGetGallery
 
         //
         // GET: /stats/packages
-
+        [HttpGet]
         public virtual async Task<ActionResult> Packages()
         {
             if (_statisticsService == NullStatisticsService.Instance)
@@ -134,7 +140,7 @@ namespace NuGetGallery
 
         //
         // GET: /stats/packageversions
-
+        [HttpGet]
         public virtual async Task<ActionResult> PackageVersions()
         {
             if (_statisticsService == NullStatisticsService.Instance)
@@ -165,7 +171,7 @@ namespace NuGetGallery
 
         //
         // GET: /stats/packages/{id}
-
+        [HttpGet]
         public virtual async Task<ActionResult> PackageDownloadsByVersion(string id, string[] groupby)
         {
             if (_statisticsService == NullStatisticsService.Instance)
@@ -186,7 +192,7 @@ namespace NuGetGallery
 
         //
         // GET: /stats/reports/packages/{id}
-
+        [HttpGet]
         public virtual async Task<JsonResult> PackageDownloadsByVersionReport(string id, string[] groupby)
         {
             if (_statisticsService == NullStatisticsService.Instance)
@@ -201,12 +207,14 @@ namespace NuGetGallery
                 return Json(HttpStatusCode.NotFound, new[] { Strings.PackageWithIdDoesNotExist }, JsonRequestBehavior.AllowGet);
             }
 
-            return Json(HttpStatusCode.OK, packageStatisticsReport, JsonRequestBehavior.AllowGet);
+            var response = Json(HttpStatusCode.OK, packageStatisticsReport, JsonRequestBehavior.AllowGet);
+            response.MaxJsonLength = _appConfiguration?.MaxJsonLengthOverride;
+            return response;
         }
 
         //
         // GET: /stats/packages/{id}/{version}
-
+        [HttpGet]
         public virtual async Task<ActionResult> PackageDownloadsDetail(string id, string version, string[] groupby)
         {
             if (_statisticsService == NullStatisticsService.Instance)
@@ -227,7 +235,7 @@ namespace NuGetGallery
 
         //
         // GET: /stats/reports/packages/{id}/{version}
-
+        [HttpGet]
         public virtual async Task<ActionResult> PackageDownloadsDetailReport(string id, string version, string[] groupby)
         {
             if (_statisticsService == NullStatisticsService.Instance)

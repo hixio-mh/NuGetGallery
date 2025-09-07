@@ -18,7 +18,7 @@ namespace NuGetGallery
 {
     public class TelemetryService : ITelemetryService, IFeatureFlagTelemetryService
     {
-        public class Events
+        public static class Events
         {
             public const string ODataQueryFilter = "ODataQueryFilter";
             public const string ODataCustomQuery = "ODataCustomQuery";
@@ -28,6 +28,7 @@ namespace NuGetGallery
             public const string VerifyPackageKey = "VerifyPackageKey";
             public const string PackageReadMeChanged = "PackageReadMeChanged";
             public const string PackagePushNamespaceConflict = "PackagePushNamespaceConflict";
+            public const string PackagePushOwnerlessNamespaceConflict = "PackagePushOwnerlessNamespaceConflict";
             public const string NewUserRegistration = "NewUserRegistration";
             public const string CredentialAdded = "CredentialAdded";
             public const string CredentialUsed = "CredentialUsed";
@@ -37,6 +38,8 @@ namespace NuGetGallery
             public const string GalleryDownloadGreaterThanJsonForPackageRegistration = "GalleryDownloadGreaterThanJsonForPackageRegistration";
             public const string GetPackageDownloadCountFailed = "GetPackageDownloadCountFailed";
             public const string GetPackageRegistrationDownloadCountFailed = "GetPackageRegistrationDownloadCountFailed";
+            public const string DownloadJsonTotalPackageIds = "DownloadJsonTotalPackageIds";
+            public const string DownloadJsonTotalPackageVersions = "DownloadJsonTotalPackageVersions";
             public const string UserPackageDeleteCheckedAfterHours = "UserPackageDeleteCheckedAfterHours";
             public const string UserPackageDeleteExecuted = "UserPackageDeleteExecuted";
             public const string UserMultiFactorAuthenticationEnabled = "UserMultiFactorAuthenticationEnabled";
@@ -44,6 +47,7 @@ namespace NuGetGallery
             public const string PackageReflow = "PackageReflow";
             public const string PackageUnlisted = "PackageUnlisted";
             public const string PackageListed = "PackageListed";
+            public const string PackagesUpdateListed = "PackagesUpdateListed";
             public const string PackageDelete = "PackageDelete";
             public const string PackageDeprecate = "PackageDeprecate";
             public const string PackageReupload = "PackageReupload";
@@ -87,6 +91,12 @@ namespace NuGetGallery
             public const string ABTestEnrollmentInitialized = "ABTestEnrollmentInitialized";
             public const string ABTestEnrollmentUpgraded = "ABTestEnrollmentUpgraded";
             public const string ABTestEvaluated = "ABTestEvaluated";
+            public const string PackagePushDisconnect = "PackagePushDisconnect";
+            public const string SymbolPackagePushDisconnect = "SymbolPackagePushDisconnect";
+            public const string VulnerabilitiesCacheRefreshDurationMs = "VulnerabilitiesCacheRefreshDurationMs";
+            public const string InstanceUptime = "InstanceUptimeInDays";
+            public const string ApiRequest = "ApiRequest";
+            public const string CreateSqlConnectionDurationMs = "CreateSqlConnectionDurationMs";
         }
 
         private readonly IDiagnosticsSource _diagnosticsSource;
@@ -118,6 +128,7 @@ namespace NuGetGallery
         public const string ClientVersion = "ClientVersion";
         public const string ProtocolVersion = "ProtocolVersion";
         public const string ClientInformation = "ClientInformation";
+        public const string UserAgent = "UserAgent";
         public const string IsAuthenticated = "IsAuthenticated";
         public const string IsScoped = "IsScoped";
         public const string KeyCreationDate = "KeyCreationDate";
@@ -125,11 +136,15 @@ namespace NuGetGallery
         public const string PackageVersion = "PackageVersion";
         public const string PackageVersions = "PackageVersions";
 
+        // Package listed properties
+        public const string Listed = "Listed";
+
         // Package deprecate properties
         public const string DeprecationReason = "PackageDeprecationReason";
         public const string DeprecationAlternatePackageId = "PackageDeprecationAlternatePackageId";
         public const string DeprecationAlternatePackageVersion = "PackageDeprecationAlternatePackageVersion";
         public const string DeprecationCustomMessage = "PackageDeprecationCustomMessage";
+        public const string DeprecationHasChanges = "PackageDeprecationHasChanges";
 
         // User properties
         public const string RegistrationMethod = "RegistrationMethod";
@@ -223,6 +238,12 @@ namespace NuGetGallery
         public const string TestBucket = "TestBucket";
         public const string TestPercentage = "TestPercentage";
 
+        public const string Endpoint = "Endpoint";
+
+        public const string Kind = "Kind";
+        public const string Sync = "Sync";
+        public const string Async = "Async";
+
         public TelemetryService(IDiagnosticsSource diagnosticsSource, ITelemetryClient telemetryClient)
         {
             _telemetryClient = telemetryClient ?? throw new ArgumentNullException(nameof(telemetryClient));
@@ -256,9 +277,19 @@ namespace NuGetGallery
             });
         }
 
-        public void TrackDownloadJsonRefreshDuration(long milliseconds)
+        public void TrackDownloadJsonRefreshDuration(TimeSpan duration)
         {
-            TrackMetric(Events.DownloadJsonRefreshDuration, milliseconds, properties => { });
+            TrackMetric(Events.DownloadJsonRefreshDuration, duration.TotalMilliseconds, properties => { });
+        }
+
+        public void TrackDownloadJsonTotalPackageIds(int totalPackageIds)
+        {
+            TrackMetric(Events.DownloadJsonTotalPackageIds, totalPackageIds, properties => { });
+        }
+
+        public void TrackDownloadJsonTotalPackageVersions(int totalPackageVersions)
+        {
+            TrackMetric(Events.DownloadJsonTotalPackageVersions, totalPackageVersions, properties => { });
         }
 
         public void TrackDownloadCountDecreasedDuringRefresh(string packageId, string packageVersion, long oldCount, long newCount)
@@ -362,6 +393,11 @@ namespace NuGetGallery
             TrackMetricForPackage(Events.PackagePushNamespaceConflict, packageId, packageVersion, user, identity);
         }
 
+        public void TrackPackagePushOwnerlessNamespaceConflictEvent(string packageId, string packageVersion, User user, IIdentity identity)
+        {
+            TrackMetricForPackage(Events.PackagePushOwnerlessNamespaceConflict, packageId, packageVersion, user, identity);
+        }
+
         public void TrackCreatePackageVerificationKeyEvent(string packageId, string packageVersion, User user, IIdentity identity)
         {
             TrackMetricForPackage(Events.CreatePackageVerificationKey, packageId, packageVersion, user, identity);
@@ -449,6 +485,17 @@ namespace NuGetGallery
             TrackMetricForPackage(Events.PackageListed, package);
         }
 
+        public void TrackPackagesUpdateListed(IReadOnlyList<Package> packages, bool listed)
+        {
+            TrackMetricForPackageVersions(
+                Events.PackagesUpdateListed,
+                packages,
+                properties =>
+                {
+                    properties.Add(Listed, listed.ToString());
+                });
+        }
+
         public void TrackPackageDelete(Package package, bool isHardDelete)
         {
             TrackMetricForPackage(Events.PackageDelete, package, properties =>
@@ -482,7 +529,8 @@ namespace NuGetGallery
             PackageDeprecationStatus status,
             PackageRegistration alternateRegistration,
             Package alternatePackage,
-            bool hasCustomMessage)
+            bool hasCustomMessage,
+            bool hasChanges)
         {
             TrackMetricForPackageVersions(
                 Events.PackageDeprecate,
@@ -493,6 +541,7 @@ namespace NuGetGallery
                     properties.Add(DeprecationAlternatePackageId, alternateRegistration?.Id ?? alternatePackage?.Id);
                     properties.Add(DeprecationAlternatePackageVersion, alternatePackage?.NormalizedVersion);
                     properties.Add(DeprecationCustomMessage, hasCustomMessage.ToString());
+                    properties.Add(DeprecationHasChanges, hasChanges.ToString());
                 });
         }
 
@@ -857,7 +906,7 @@ namespace NuGetGallery
 
             TrackMetric(Events.AccountDeleteCompleted, 1, properties =>
             {
-                properties.Add(AccountDeletedByRole, BuildArrayProperty(deletedBy.Roles?.Select(role => role.Name) ?? new string[0]));
+                properties.Add(AccountDeletedByRole, BuildArrayProperty(deletedBy.Roles?.Select(role => role.Name) ?? Array.Empty<string>()));
                 properties.Add(AccountIsSelfDeleted, $"{deletedUser.Key == deletedBy.Key}");
                 properties.Add(AccountDeletedIsOrganization, $"{deletedUser is Organization}");
                 properties.Add(AccountDeleteSucceeded, $"{success}");
@@ -1053,12 +1102,14 @@ namespace NuGetGallery
         }
 
         public void TrackABTestEnrollmentUpgraded(
+            int oldSchemaVersion,
             int newSchemaVersion,
             int previewSearchBucket,
             int packageDependentBucket)
         {
             TrackMetric(Events.ABTestEnrollmentUpgraded, 1, properties =>
             {
+                properties.Add(OldSchemaVersion, oldSchemaVersion.ToString());
                 properties.Add(NewSchemaVersion, newSchemaVersion.ToString());
                 properties.Add(PreviewSearchBucket, previewSearchBucket.ToString());
                 properties.Add(PackageDependentBucket, packageDependentBucket.ToString());
@@ -1080,6 +1131,43 @@ namespace NuGetGallery
                 properties.Add(TestBucket, testBucket.ToString());
                 properties.Add(TestPercentage, testPercentage.ToString());
             });
+        }
+
+        public void TrackPackagePushDisconnectEvent()
+        {
+            TrackMetric(Events.PackagePushDisconnect, 1, _ => { });
+        }
+
+        public void TrackSymbolPackagePushDisconnectEvent()
+        {
+            TrackMetric(Events.SymbolPackagePushDisconnect, 1, _ => { });
+        }
+
+        public void TrackInstanceUptime(TimeSpan uptime)
+        {
+            TrackMetric(Events.InstanceUptime, uptime.TotalDays, _ => { });
+        }
+
+        public void TrackVulnerabilitiesCacheRefreshDuration(TimeSpan duration)
+        {
+            TrackMetric(Events.VulnerabilitiesCacheRefreshDurationMs, duration.TotalMilliseconds, properties => { });
+        }
+
+        public void TrackApiRequest(string endpoint)
+        {
+            _telemetryClient.TrackAggregatedMetric(Events.ApiRequest, 1, Endpoint, endpoint);
+        }
+
+        public IDisposable TrackSyncSqlConnectionCreationDuration()
+            => TrackSqlConnectionCreationDuration(Sync);
+
+        public IDisposable TrackAsyncSqlConnectionCreationDuration()
+            => TrackSqlConnectionCreationDuration(Async);
+
+        private IDisposable TrackSqlConnectionCreationDuration(string kind)
+        {
+            return new DurationTracker(duration => 
+                _telemetryClient.TrackAggregatedMetric(Events.CreateSqlConnectionDurationMs, duration.TotalMilliseconds, Kind, kind));
         }
 
         /// <summary>

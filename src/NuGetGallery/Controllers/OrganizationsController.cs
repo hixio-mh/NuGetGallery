@@ -11,6 +11,7 @@ using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
 using NuGetGallery.Authentication;
 using NuGetGallery.Filters;
+using NuGetGallery.Frameworks;
 using NuGetGallery.Helpers;
 using NuGetGallery.Infrastructure.Mail.Messages;
 using NuGetGallery.Security;
@@ -35,7 +36,8 @@ namespace NuGetGallery
             IMessageServiceConfiguration messageServiceConfiguration,
             IIconUrlProvider iconUrlProvider,
             IFeatureFlagService features,
-            IGravatarProxyService gravatarProxy)
+            IGravatarProxyService gravatarProxy,
+            IPackageFrameworkCompatibilityFactory frameworkCompatibilityFactory)
             : base(
                   authService,
                   packageService,
@@ -48,7 +50,9 @@ namespace NuGetGallery
                   messageServiceConfiguration,
                   deleteAccountService,
                   iconUrlProvider,
-                  gravatarProxy)
+                  gravatarProxy,
+                  features,
+                  frameworkCompatibilityFactory)
         {
             _features = features ?? throw new ArgumentNullException(nameof(features));
         }
@@ -67,7 +71,7 @@ namespace NuGetGallery
             var message = new NewAccountMessage(
                 MessageServiceConfiguration,
                 account,
-                Url.ConfirmOrganizationEmail(account.Username, account.EmailConfirmationToken, relativeUrl: false));
+                Url.ConfirmOrganizationEmail(account.Username, account.EmailConfirmationToken, relativeUrl: false, supportEmail: true));
 
             return MessageService.SendMessageAsync(message);
         }
@@ -77,7 +81,7 @@ namespace NuGetGallery
             var message = new EmailChangeConfirmationMessage(
                 MessageServiceConfiguration,
                 account,
-                Url.ConfirmOrganizationEmail(account.Username, account.EmailConfirmationToken, relativeUrl: false));
+                Url.ConfirmOrganizationEmail(account.Username, account.EmailConfirmationToken, relativeUrl: false, supportEmail: true));
 
             return MessageService.SendMessageAsync(message);
         }
@@ -151,9 +155,9 @@ namespace NuGetGallery
                     request.NewMember,
                     currentUser,
                     request.IsAdmin,
-                    profileUrl: Url.User(account, relativeUrl: false),
-                    confirmationUrl: Url.AcceptOrganizationMembershipRequest(request, relativeUrl: false),
-                    rejectionUrl: Url.RejectOrganizationMembershipRequest(request, relativeUrl: false));
+                    profileUrl: Url.User(account, relativeUrl: false, supportEmail: true),
+                    confirmationUrl: Url.AcceptOrganizationMembershipRequest(request, relativeUrl: false, supportEmail: true),
+                    rejectionUrl: Url.RejectOrganizationMembershipRequest(request, relativeUrl: false, supportEmail: true));
                 await MessageService.SendMessageAsync(organizationMembershipRequestMessage);
 
                 var organizationMembershipRequestInitiatedMessage = new OrganizationMembershipRequestInitiatedMessage(

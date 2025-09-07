@@ -1,9 +1,11 @@
-﻿@using Newtonsoft.Json
+﻿﻿@using Newtonsoft.Json
 @model ApiKeyListViewModel
 @using NuGetGallery.Authentication
 @{
     ViewBag.Title = "API Keys";
     ViewBag.MdPageColumns = GalleryConstants.ColumnsFormMd;
+    var featureFlagService = DependencyResolver.Current.GetService<IFeatureFlagService>();
+    ViewBag.IsTrustedPublishingEnabled = featureFlagService != null && featureFlagService.IsTrustedPublishingEnabled(CurrentUser);
 }
 
 <section role="main" class="container main-container page-api-keys">
@@ -11,6 +13,18 @@
     <div class="row">
         <div class="@ViewHelpers.GetColumnClasses(ViewBag)">
             @ViewHelpers.BreadcrumbWithProfile(Url, CurrentUser, true, @<text>API keys</text>)
+
+            @if (ViewBag.IsTrustedPublishingEnabled)
+            {
+                @ViewHelpers.Alert(
+                    @<text>
+                        <strong>Looking for a more secure and streamlined way to publish packages?</strong>
+                        If you're using GitHub Actions, we recommend switching to
+                        <a href="@Url.ManageMyTrustedPublishing()">Trusted Publishing</a> since it eliminates the need to manage API keys.
+                    </text>,
+                    "info", icon: null)
+            }
+
             <p>
                 An API key is a token that can identify you to @(Config.Current.Brand). The
                 <a href="https://docs.nuget.org/Consume/Command-Line-Reference">NuGet command-line utility</a> allows
@@ -27,17 +41,11 @@
             else
             {
                 <p>
-                    <strong>Always keep your API keys a secret!</strong> If one of your keys is accidentally revealed,
-                    you can always generate a new one at any time. You can also remove existing API keys if necessary.
-                    <br />
-                    <p>
-                        <strong>Note:</strong> To push packages to nuget.org you must use <a href="https://www.nuget.org/downloads">nuget.exe v4.1.0 or above</a>,
-                        which implements the required <a href="https://docs.microsoft.com/en-us/nuget/api/nuget-protocols">NuGet protocols</a>.
-                    </p>
+                    <strong>Always keep your API keys a secret! If an API key is ever exposed, revoke it immediately and generate a new one to maintain security.</strong>
                 </p>
 
                 <div data-bind="template: 'error-container'"></div>
-                
+
                 @ViewHelpers.Section(this,
                     "create",
                     "Create",
@@ -46,9 +54,9 @@
                             <div class="panel-body" data-bind="template: { name: 'upsert-api-key', data: NewApiKey }"></div>
                         </div>
                     </text>,
-                    expanded: false,
-                    expandedIcon: "Subtraction",
-                    collapsedIcon: "Add")
+        expanded: false,
+        expandedIcon: "Subtraction",
+        collapsedIcon: "Add")
 
                 @ViewHelpers.Section(this,
                     "manage",
@@ -61,13 +69,13 @@
     </div>
 </section>
 
-<script type="text/html" id="error-container">
+<script type="text/html" id="error-container" nonce="@Html.GetCSPNonce()">
     <!-- ko if: Error -->
     @ViewHelpers.AlertDanger(@<text><span data-bind="html: Error"></span></text>)
     <!-- /ko -->
 </script>
 
-<script type="text/html" id="manage-api-keys">
+<script type="text/html" id="manage-api-keys" nonce="@Html.GetCSPNonce()">
     <!-- ko if: RevocationDescriptions().length > 0 -->
     @ViewHelpers.AlertWarning(
         @<text>
@@ -144,7 +152,7 @@
     <!-- /ko -->
 </script>
 
-<script type="text/html" id="api-key-details">
+<script type="text/html" id="api-key-details" nonce="@Html.GetCSPNonce()">
     <div class="api-key-details">
         <div class="row">
             <div class="col-sm-1">
@@ -253,6 +261,14 @@
                             <span>Delete</span>
                         </a>
                     </li>
+                    <!-- ko ifnot: HasExpired -->
+                    <li>
+                        <a class="icon-link" href="#" role="button" data-bind="click: Revoke">
+                            <i class="ms-Icon ms-Icon--Blocked2" aria-hidden="true"></i>
+                            <span>Revoke</span>
+                        </a>
+                    </li>
+                    <!-- /ko -->
                 </ul>
             </div>
         </div>
@@ -269,14 +285,14 @@
     </div>
 </script>
 
-<script type="text/html" id="upsert-api-key">
+<script type="text/html" id="upsert-api-key" nonce="@Html.GetCSPNonce()">
     <form class="upsert-form" data-bind="submit: CreateOrEdit, attr: { id: FormId }">
         <!-- ko ifnot: Key -->
         <div class="row">
             <div class="col-sm-7 form-group">
-                <label data-bind="attr: { for: DescriptionId,
+                <label class="control-label required" data-bind="attr: { for: DescriptionId,
                                           id: DescriptionId() + '-label' }">Key Name</label>
-                <input type="text" class="form-control"
+                <input type="text" class="form-control input-brand"
                        data-bind="attr: { id: DescriptionId,
                                           name: DescriptionId,
                                           'aria-labelledby': DescriptionId() + '-label ' + DescriptionId() + '-validation-message' },
@@ -291,7 +307,7 @@
             {
                 <div class="col-sm-5 form-group">
                     <label data-bind="attr: { id: ExpiresInId() + '-label', for: ExpiresInId() }">Expires In</label>
-                    <select class="form-control"
+                    <select class="form-control select-brand"
                             data-bind="attr: { id: ExpiresInId(),
                                                name: ExpiresInId(),
                                                'aria-labelledby': ExpiresInId() + '-label' },
@@ -319,14 +335,15 @@
 
         <div class="row">
             <div class="col-sm-7 form-group">
-                <label data-bind="attr: { for: PackageOwnerId,
+                <label class="required" data-bind="attr: { for: PackageOwnerId,
                                             id: PackageOwnerId() + '-label' }">Package Owner</label>
-                <select class="form-control"
+                <select class="form-control select-brand"
+                        aria-required="true"
                         data-bind="attr: { id: PackageOwnerId,
                                                     name: PackageOwnerId,
                                                     'aria-labelledby': PackageOwnerId() + '-label' },
                                             options: PackageOwners, value: PackageOwner, optionsText: 'Owner', optionsCaption: 'Select an owner...' "></select>
-                <div class="has-error">
+                <div class="has-error-brand">
                     <span class="field-validation-valid help-block"
                           data-bind="text: PackageOwner() ?  '' : 'A package owner must be selected.'" aria-live="polite" role="alert"></span>
                 </div>
@@ -335,52 +352,54 @@
 
         <div class="row">
             <div class="col-sm-12 form-group">
-                <b class="ms-fontSize-xl">Select Scopes</b>
-                <br />
-                <span class="has-error">
+                <h4 id="select-scopes" class="ms-fontSize-xl"><b>Select Scopes</b></h4>
+                <span class="has-error-brand">
                     <span class="help-block" data-bind="text: ScopesError" aria-live="polite" role="alert"></span>
                 </span>
                 <ul role="presentation">
                     <li>
-                        <div class="checkbox">
-                            <label>
-                                <input type="checkbox" data-bind="checked: PushEnabled, enable: PushAnyEnabled" />
-                                Push
+                        <div class="row-checkbox-label">
+                            <label id="select-scopes-push" class="brand-checkbox">
+                                <input type="checkbox" data-bind="checked: PushEnabled, enable: PushAnyEnabled" aria-labelledby="select-scopes-push select-scopes" />
+                                <span>Push</span>
                             </label>
                         </div>
                         <ul role="presentation" data-bind="css: { disabled: !PushEnabled() }">
                             <li>
-                                <div class="radio">
+                                <div class="row-checkbox-label">
                                     <div class="label-sibling">
+                                    </div>
+                                    <label id="select-scopes-push-package" class="brand-radio" data-bind="attr: { for: PackagePushId }"
+                                           aria-labelledby="select-scopes-push-package select-scopes">
                                         <input name="PushScope" type="radio" value="@NuGetScopes.PackagePush"
                                                data-bind="checked: PushScope, enable: PushNewEnabled,
                                                           attr: { id: PackagePushId }" />
-                                    </div>
-                                    <label data-bind="attr: { for: PackagePushId }">
-                                        @NuGetScopes.Describe(NuGetScopes.PackagePush)
+                                        <span>@NuGetScopes.Describe(NuGetScopes.PackagePush, Model.IsDeprecationApiEnabled)</span>
                                     </label>
                                 </div>
                             </li>
                             <li>
-                                <div class="radio">
+                                <div class="row-checkbox-label">
                                     <div class="label-sibling">
+                                    </div>
+                                    <label id="select-scopes-push-package-version" class="brand-radio" data-bind="attr: { for: PackagePushVersionId }" 
+                                           aria-labelledby="select-scopes-push-package-version select-scopes">
                                         <input name="PushScope" type="radio" value="@NuGetScopes.PackagePushVersion"
                                                data-bind="checked: PushScope, enable: PushExistingEnabled,
                                                           attr: { id: PackagePushVersionId }" />
-                                    </div>
-                                    <label data-bind="attr: { for: PackagePushVersionId }">
-                                        @NuGetScopes.Describe(NuGetScopes.PackagePushVersion)
+                                        <span>@NuGetScopes.Describe(NuGetScopes.PackagePushVersion, Model.IsDeprecationApiEnabled)</span>
                                     </label>
                                 </div>
                             </li>
                         </ul>
                     </li>
                     <li>
-                        <div class="checkbox">
-                            <label>
+                        <div class="row-checkbox-label">
+                            <label id="select-scopes-unlist" class="brand-checkbox">
                                 <input type="checkbox" value="@NuGetScopes.PackageUnlist"
+                                       aria-labelledby="select-scopes-unlist select-scopes"
                                        data-bind="checked: UnlistScopeChecked, enable: UnlistEnabled" />
-                                @NuGetScopes.Describe(NuGetScopes.PackageUnlist)
+                                <span>@NuGetScopes.Describe(NuGetScopes.PackageUnlist, Model.IsDeprecationApiEnabled)</span>
                             </label>
                         </div>
                     </li>
@@ -390,19 +409,19 @@
         <!-- /ko -->
         <div class="row">
             <div class="col-sm-12">
-                <b class="ms-fontSize-xl">Select Packages</b>
+                <h4 class="ms-fontSize-xl"><b>Select Packages</b></h4>
                 <p>
                     To select which packages to associate with a key, use a glob pattern, select
                     individual packages, or both.
                 </p>
-                <div class="has-error">
-                    <span class="help-block" data-bind="text: SubjectsError"></span>
+                <div class="has-error-brand">
+                    <span class="help-block" data-bind="text: SubjectsError" aria-live="polite" role="alert"></span>
                 </div>
-                <div class="has-error">
+                <div class="has-error-brand">
                     <span class="field-validation-valid help-block"
                           data-valmsg-replace="true"
                           data-bind="attr: { 'data-valmsg-for': GlobPatternId,
-                                             id: GlobPatternId() + '-validation-message' }"></span>
+                                             id: GlobPatternId() + '-validation-message' }" aria-live="polite" role="alert"></span>
                 </div>
             </div>
         </div>
@@ -415,59 +434,62 @@
             </div>
         </div>
         <div class="row select-packages-form" data-bind="css: { disabled: !SelectPackagesEnabled() }">
-            <div class="col-sm-7">
-                <div class="form-group">
-                    <input type="text" class="form-control" data-val="true"
-                           data-val-regex="Invalid glob pattern. See the example glob patterns below for further details."
-                           data-val-regex-pattern="^[\*\w_.-]*$"
-                           data-bind="textInput: PendingGlobPattern,
+            <div class="col-sm-7 select-packages-inputs">
+                <div>
+                    <div class="form-group">
+                        <input type="text" class="form-control input-brand" data-val="true"
+                               data-val-regex="Invalid glob pattern. See the example glob patterns below for further details."
+                               data-val-regex-pattern="^[\*\w_.-]*$"
+                               data-bind="textInput: PendingGlobPattern,
                                       attr: { id: GlobPatternId,
                                               name: GlobPatternId,
                                               'aria-labelledby': GlobPatternId() + '-label ' + GlobPatternId() + '-validation-message' },
                                       enable: SelectPackagesEnabled" />
-                </div>
-                <div class="form-group">
-                    <label>Available Packages</label>
-                    <div class="panel panel-default available-packages">
-                        <div class="panel-body">
-                            <!-- ko foreach: PendingPackages -->
-                            <div class="checkbox" data-bind="css: { disabled: Matched }">
-                                <label>
-                                    <input type="checkbox" name="Packages"
-                                           data-bind="checked: Checked,
+                    </div>
+                    <div class="form-group available-packages-container">
+                        <label>Available Packages</label>
+                        <div class="panel panel-default available-packages">
+                            <div class="panel-body">
+                                <!-- ko foreach: PendingPackages -->
+                                <div class="row-checkbox-label" data-bind="css: { disabled: Matched }">
+                                    <label class="brand-checkbox">
+                                        <input type="checkbox" name="Packages"
+                                               data-bind="checked: Checked,
                                                       enable: $parent.SelectPackagesEnabled" />
-                                    <!-- ko text: Id -->
-                                    <!-- /ko -->
-                                </label>
+                                        <span data-bind="text: Id"></span>
+                                    </label>
+                                </div>
+                                <!-- /ko -->
                             </div>
-                            <!-- /ko -->
                         </div>
                     </div>
                 </div>
             </div>
             <div class="col-sm-5">
-                <div class="panel panel-default glob-pattern-hint">
-                    <div class="panel-body">
-                        <p>A glob pattern allows you to replace any sequence of characters with '*'.</p>
-                        <p>Example glob patterns:</p>
-                        <table class="table table-condensed borderless">
-                            <thead>
-                                <tr>
-                                    <th>Pattern</th>
-                                    <th>Result</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>*</td>
-                                    <td>Select all packages</td>
-                                </tr>
-                                <tr>
-                                    <td>Alpha.*</td>
-                                    <td>Select any package that has an ID beginning with <i>Alpha</i></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                <div class="form-group">
+                    <div class="panel panel-default glob-pattern-hint">
+                        <div class="panel-body">
+                            <p>A glob pattern allows you to replace any sequence of characters with '*'.</p>
+                            <p>Example glob patterns:</p>
+                            <table class="table-responsive table-condensed borderless" aria-label="Example glob patterns">
+                                <thead>
+                                    <tr>
+                                        <th>Pattern</th>
+                                        <th>Result</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>*</td>
+                                        <td>Select all packages</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Alpha*</td>
+                                        <td>Select any package that has an ID beginning with <i>Alpha</i></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -481,9 +503,9 @@
         </div>
         <div class="row">
             <div class="col-sm-6 form-group">
-                <input type="submit" class="btn btn-primary btn-block"
+                <input type="submit" class="btn btn-brand btn-block"
                        data-bind="enable: SelectPackagesEnabled() && !PendingCreateOrEdit(),
-                                  attr: { value: Key() ? 'Edit' : 'Create' }" />
+                                  attr: { value: Key() ? 'Save' : 'Create' }" />
             </div>
             <div class="col-sm-6 form-group">
                 <button data-bind="attr: { 'data-target': '#' + EditContainerId(),
@@ -491,7 +513,7 @@
                                            id: CancelEditId },
                                    enable: SelectPackagesEnabled() && !PendingCreateOrEdit(),
                                    click: CancelEdit"
-                        class="btn btn-default btn-block" data-toggle="collapse">
+                        class="btn btn-brand-secondary btn-block">
                     Cancel
                 </button>
             </div>
@@ -502,7 +524,7 @@
 </script>
 
 @section bottomScripts {
-    <script type="text/javascript">
+    <script type="text/javascript" nonce="@Html.GetCSPNonce()">
         var initialData = @Html.ToJson(new
                      {
                          ApiKeys = Model.ApiKeys,
@@ -511,6 +533,7 @@
                          PackagePushVersionScope = NuGetScopes.PackagePushVersion,
                          PackageUnlistScope = NuGetScopes.PackageUnlist,
                          RemoveUrl = Url.RemoveCredential(),
+                         RevokeUrl = Url.RevokeApiKeyCredential(),
                          RegenerateUrl = Url.RegenerateCredential(),
                          EditUrl = Url.EditCredential(),
                          GenerateUrl = Url.GenerateApiKey(),
@@ -526,5 +549,5 @@
                          }
                      });
     </script>
-    @Scripts.Render("~/Scripts/gallery/page-api-keys.min.js")
+    @Scripts.RenderFormat("<script src=\"{0}\" nonce='" + @Html.GetCSPNonce().ToString() + "'></script>", "~/Scripts/gallery/page-api-keys.min.js");
 }

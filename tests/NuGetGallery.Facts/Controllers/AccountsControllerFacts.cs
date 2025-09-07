@@ -14,6 +14,12 @@ using NuGetGallery.Framework;
 using NuGetGallery.Infrastructure.Mail.Messages;
 using Xunit;
 
+// Justification: this generic class will have implementations provided in child classes
+#pragma warning disable xUnit1032 // Test classes cannot be nested within a generic class
+
+// Justification: the member data is provided by child classes.
+#pragma warning disable xUnit1015 // MemberData must reference an existing member
+
 namespace NuGetGallery
 {
     public class AccountsControllerFacts<TAccountsController, TUser, TAccountViewModel>
@@ -152,7 +158,7 @@ namespace NuGetGallery
 
                 // Assert
                 Assert.False(controller.ModelState.IsValid);
-                Assert.Equal(1, controller.ModelState.Keys.Count);
+                Assert.Single(controller.ModelState.Keys);
                 Assert.Equal("ChangeEmail.NewEmail", controller.ModelState.Keys.Single());
             }
 
@@ -749,7 +755,7 @@ namespace NuGetGallery
             }
         }
 
-        public abstract class TheDeleteAccountAction : AccountsControllerTestContainer
+        public abstract class TheDeleteAccountBaseAction : AccountsControllerTestContainer
         {
             [Fact]
             public void DeleteNotExistentAccount()
@@ -779,7 +785,7 @@ namespace NuGetGallery
                     .Setup(stub => stub.FindByUsername(userName, false))
                     .Returns(testUser);
 
-                // act
+                // Act
                 var result = controller.Delete(accountName: userName);
 
                 // Assert
@@ -787,8 +793,10 @@ namespace NuGetGallery
             }
         }
 
-        public abstract class TheDeleteAccountPostAction : AccountsControllerTestContainer
+        public abstract class TheDeleteAccountPostBaseAction : AccountsControllerTestContainer
         {
+            protected abstract TUser CreateUser(Fakes fakes, string username);
+
             [Fact]
             public async Task DeleteNotExistentAccount()
             {
@@ -809,6 +817,36 @@ namespace NuGetGallery
             }
 
             [Fact]
+            public async Task DeleteLockedAccount()
+            {
+                // Arrange
+                string username = "LockedUser";
+                var controller = GetController();
+
+                var fakes = Get<Fakes>();
+                var testUser = CreateUser(fakes, username);
+                testUser.UserStatusKey = UserStatus.Locked;
+
+                GetMock<IUserService>()
+                    .Setup(stub => stub.FindByUsername(username, false))
+                    .Returns(testUser);
+
+                var model = new DeleteAccountAsAdminViewModel()
+                {
+                    AccountName = username
+                };
+
+                // Act
+                var result = await controller.Delete(model);
+
+                // Assert
+                var status = ResultAssert.IsView<DeleteAccountStatus>(result, "DeleteAccountStatus");
+                Assert.Equal(username, status.AccountName);
+                Assert.False(status.Success);
+                Assert.Equal($"Account {username} is locked.", status.Description);
+            }
+
+            [Fact]
             public async Task DeleteDeletedAccount()
             {
                 // Arrange
@@ -816,7 +854,7 @@ namespace NuGetGallery
                 var controller = GetController();
 
                 var fakes = Get<Fakes>();
-                var testUser = fakes.CreateUser(username);
+                var testUser = CreateUser(fakes, username);
                 testUser.IsDeleted = true;
 
                 GetMock<IUserService>()
@@ -828,7 +866,7 @@ namespace NuGetGallery
                     AccountName = username
                 };
 
-                // act
+                // Act
                 var result = await controller.Delete(model);
 
                 // Assert
@@ -852,11 +890,15 @@ namespace NuGetGallery
                 string username = "RegularUser";
                 var controller = GetController();
                 var fakes = Get<Fakes>();
-                var testUser = fakes.CreateUser(username);
+                var testUser = CreateUser(fakes, username);
                 testUser.IsDeleted = false;
                 testUser.Key = 1;
                 var adminUser = fakes.Admin;
                 controller.SetCurrentUser(adminUser);
+
+                GetMock<IUserService>()
+                    .Setup(stub => stub.FindByUsername(username, false))
+                    .Returns(testUser);
 
                 var expectedStatus = new DeleteAccountStatus();
                 GetMock<IDeleteAccountService>()
@@ -872,7 +914,7 @@ namespace NuGetGallery
                     ShouldUnlist = shouldUnlist
                 };
 
-                // act
+                // Act
                 var result = await controller.Delete(model);
                 var status = ResultAssert.IsView<DeleteAccountStatus>(result, "DeleteAccountStatus");
 

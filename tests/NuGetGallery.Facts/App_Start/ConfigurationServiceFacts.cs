@@ -1,5 +1,6 @@
 ﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System;
 using System.Configuration;
 using System.Threading.Tasks;
@@ -21,15 +22,17 @@ namespace NuGetGallery.App_Start
                 public TestableConfigurationService() : base()
                 {
                     StubConfiguredSiteRoot = "http://aSiteRoot/";
+                    StubConfiguredSupportEmailSiteRoot = "http://aSupportEmailSiteRoot";
 
                     StubRequest = new Mock<HttpRequestBase>();
                     StubRequest.Setup(stub => stub.IsLocal).Returns(false);
 
                     var secretReaderFactory = new EmptySecretReaderFactory();
-                    SecretInjector = secretReaderFactory.CreateSecretInjector(secretReaderFactory.CreateSecretReader());
+                    SecretInjector = secretReaderFactory.CreateSecretInjector(secretReaderFactory.CreateSecretReader()) as ICachingSecretInjector;
                 }
 
                 public string StubConfiguredSiteRoot { get; set; }
+                public string StubConfiguredSupportEmailSiteRoot { get; set; }
                 public Mock<HttpRequestBase> StubRequest { get; set; }
 
                 protected override string GetAppSetting(string settingName)
@@ -41,8 +44,14 @@ namespace NuGetGallery.App_Start
                         return StubConfiguredSiteRoot;
                     }
 
+                    if (settingName == $"{SettingPrefix}{nameof(tempAppConfig.SupportEmailSiteRoot)}")
+                    {
+                        return StubConfiguredSupportEmailSiteRoot;
+                    }
+
                     return string.Empty;
                 }
+
             }
 
             [Fact]
@@ -99,20 +108,49 @@ namespace NuGetGallery.App_Start
 
                 Assert.Throws<InvalidOperationException>(() => configuration.GetSiteRoot(useHttps: false));
             }
+
+            [Fact]
+            public void WillGetTheConfiguredHttpsSupportEmailSiteRoot()
+            {
+                var configuration = new TestableConfigurationService();
+                configuration.StubConfiguredSupportEmailSiteRoot = "https://aSupportEmailSiteRoot";
+
+                var siteRoot = configuration.GetSupportEmailSiteRoot();
+
+                Assert.Equal("https://aSupportEmailSiteRoot", siteRoot);
+            }
+
+            [Fact]
+            public void WillThrowIfConfiguredSupportEmailSiteRootIsNotHttpOrHttps()
+            {
+                var configuration = new TestableConfigurationService();
+                configuration.StubConfiguredSupportEmailSiteRoot = "ftp://theSupportEmailSiteRoot/";
+
+                Assert.Throws<InvalidOperationException>(() => configuration.GetSupportEmailSiteRoot());
+            }
+
+            [Fact]
+            public void WillUseHttpsWhenConfiguredSiteRootIsHttp()
+            {
+                var configuration = new TestableConfigurationService();
+                configuration.StubConfiguredSupportEmailSiteRoot = "http://aSupportEmailSiteRoot";
+
+                var siteRoot = configuration.GetSupportEmailSiteRoot();
+
+                Assert.Equal("https://aSupportEmailSiteRoot", siteRoot);
+            }
         }
 
         public class TheReadSettingMethod
         {
             private class TestableConfigurationService : ConfigurationService
             {
-                public TestableConfigurationService(ISecretInjector secretInjector = null)
+                public TestableConfigurationService(ICachingSecretInjector secretInjector = null)
                 {
                     SecretInjector = secretInjector ?? CreateDefaultSecretInjector();
                 }
 
                 public string ConnectionStringStub { get; set; }
-
-                public string CloudSettingStub { get; set; }
 
                 public string AppSettingStub { get; set; }
 
@@ -121,37 +159,16 @@ namespace NuGetGallery.App_Start
                     return new ConnectionStringSettings(ConnectionStringStub, ConnectionStringStub);
                 }
 
-                protected override string GetCloudServiceSetting(string settingName)
-                {
-                    return CloudSettingStub;
-                }
-
                 protected override string GetAppSetting(string settingName)
                 {
                     return AppSettingStub;
                 }
 
-                private static ISecretInjector CreateDefaultSecretInjector()
+                private static ICachingSecretInjector CreateDefaultSecretInjector()
                 {
                     var secretReaderFactory = new EmptySecretReaderFactory();
-                    return secretReaderFactory.CreateSecretInjector(secretReaderFactory.CreateSecretReader());
+                    return secretReaderFactory.CreateSecretInjector(secretReaderFactory.CreateSecretReader()) as ICachingSecretInjector;
                 }
-            }
-
-            [Fact]
-            public async Task WhenCloudSettingIsNullStringNullIsReturned()
-            {
-                // Arrange
-                var configurationService = new TestableConfigurationService();
-                configurationService.CloudSettingStub = "null";
-                configurationService.AppSettingStub = "bla";
-                configurationService.ConnectionStringStub = "abc";
-
-                // Act 
-                string result = await configurationService.ReadSettingAsync("any");
-
-                // Assert
-                Assert. Null(result);
             }
 
             [Fact]
@@ -159,7 +176,6 @@ namespace NuGetGallery.App_Start
             {
                 // Arrange
                 var configurationService = new TestableConfigurationService();
-                configurationService.CloudSettingStub = null;
                 configurationService.AppSettingStub = string.Empty;
                 configurationService.ConnectionStringStub = "abc";
 
@@ -171,15 +187,15 @@ namespace NuGetGallery.App_Start
             }
 
             [Fact]
-            public async Task WhenSettingIsNotEmptySecretInjectorIsRan()
+            public async Task WhenSettingIsNotEmptySecretInjectorIsRun()
             {
                 // Arrange
-                var secretInjectorMock = new Mock<ISecretInjector>();
+                var secretInjectorMock = new Mock<ICachingSecretInjector>();
                 secretInjectorMock.Setup(x => x.InjectAsync(It.IsAny<string>()))
                                   .Returns<string>(s => Task.FromResult(s + "parsed"));
                 
                 var configurationService = new TestableConfigurationService(secretInjectorMock.Object);
-                configurationService.CloudSettingStub = "somevalue";
+                configurationService.ConnectionStringStub = "somevalue";
 
                 // Act 
                 string result = await configurationService.ReadSettingAsync("any");
@@ -197,15 +213,15 @@ namespace NuGetGallery.App_Start
             [InlineData("Gallery.sqlserverreadonlyreplica")]
             [InlineData("Gallery.supportrequestsqlserver")]
             [InlineData("Gallery.validationsqlserver")]
-            public async Task GivenNotInjectedSettingNameSecretInjectorIsNotRan(string settingName)
+            public async Task GivenNotInjectedSettingNameSecretInjectorIsNotRun(string settingName)
             {
                 // Arrange
-                var secretInjectorMock = new Mock<ISecretInjector>();
+                var secretInjectorMock = new Mock<ICachingSecretInjector>();
                 secretInjectorMock.Setup(x => x.InjectAsync(It.IsAny<string>()))
                     .Returns<string>(s => Task.FromResult(s + "parsed"));
 
                 var configurationService = new TestableConfigurationService(secretInjectorMock.Object);
-                configurationService.CloudSettingStub = "somevalue";
+                configurationService.ConnectionStringStub = "somevalue";
 
                 // Act
                 string result = await configurationService.ReadSettingAsync(settingName);

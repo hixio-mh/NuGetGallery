@@ -63,12 +63,33 @@ namespace NuGetGallery
 
             try
             {
-                if (ZipArchiveHelpers.FoundEntryInFuture(symbolPackageStream, out ZipArchiveEntry entryInTheFuture))
+                InvalidZipEntry anyInvalidZipEntry = ZipArchiveHelpers.ValidateArchiveEntries(symbolPackageStream, out ZipArchiveEntry invalidZipEntry);
+
+                switch (anyInvalidZipEntry)
                 {
-                    return SymbolPackageValidationResult.Invalid(string.Format(
-                        CultureInfo.CurrentCulture,
-                        Strings.PackageEntryFromTheFuture,
-                        entryInTheFuture.Name));
+                    case InvalidZipEntry.None:
+                        break;
+                    case InvalidZipEntry.InFuture:
+                        return SymbolPackageValidationResult.Invalid(string.Format(
+                            CultureInfo.CurrentCulture,
+                            Strings.PackageEntryFromTheFuture,
+                            invalidZipEntry.Name));
+                    case InvalidZipEntry.DoubleForwardSlashesInPath:
+                        return SymbolPackageValidationResult.Invalid(string.Format(
+                            CultureInfo.CurrentCulture,
+                            Strings.PackageEntryWithDoubleForwardSlash,
+                            invalidZipEntry.Name));
+                    case InvalidZipEntry.DoubleBackwardSlashesInPath:
+                        return SymbolPackageValidationResult.Invalid(string.Format(
+                            CultureInfo.CurrentCulture,
+                            Strings.PackageEntryWithDoubleBackSlash,
+                            invalidZipEntry.Name));
+                    default:
+                        // Generic error message for unknown invalid zip entry
+                        return SymbolPackageValidationResult.Invalid(string.Format(
+                            CultureInfo.CurrentCulture,
+                            Strings.InvalidPackageEntry,
+                            invalidZipEntry.Name));
                 }
 
                 using (var packageToPush = new PackageArchiveReader(symbolPackageStream, leaveStreamOpen: true))
@@ -90,7 +111,7 @@ namespace NuGetGallery
                     }
 
                     // Check for duplicated entries in symbols package
-                    if (ValidationHelper.HasDuplicatedEntries(packageToPush))
+                    if (PackageValidationHelper.HasDuplicatedEntries(packageToPush))
                     {
                         return SymbolPackageValidationResult.Invalid(Strings.UploadPackage_PackageContainsDuplicatedEntries);
                     }
@@ -241,7 +262,7 @@ namespace NuGetGallery
                             package.Version);
                     }
 
-                    throw ex;
+                    throw;
                 }
             }
             catch (FileAlreadyExistsException ex)

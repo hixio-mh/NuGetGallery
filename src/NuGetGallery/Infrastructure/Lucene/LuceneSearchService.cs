@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -25,7 +25,9 @@ namespace NuGetGallery
         private static readonly string[] FieldAliases = new[] { "Id", "Title", "Tag", "Tags", "Description", "Author", "Authors", "Owner", "Owners" };
         private static readonly string[] Fields = new[] { "Id", "Title", "Tags", "Description", "Authors", "Owners" };
 
-        public bool ContainsAllVersions { get { return false; } }
+        public bool ContainsAllVersions => false;
+
+        public bool SupportsAdvancedSearch => false;
 
         public LuceneSearchService(Lucene.Net.Store.Directory directory)
         {
@@ -100,8 +102,8 @@ namespace NuGetGallery
 
         private static Package PackageFromDoc(Document doc)
         {
-            int downloadCount = Int32.Parse(doc.Get("DownloadCount"), CultureInfo.InvariantCulture);
-            int versionDownloadCount = Int32.Parse(doc.Get("VersionDownloadCount"), CultureInfo.InvariantCulture);
+            long downloadCount = long.Parse(doc.Get("DownloadCount"), CultureInfo.InvariantCulture);
+            long versionDownloadCount = long.Parse(doc.Get("VersionDownloadCount"), CultureInfo.InvariantCulture);
             int key = Int32.Parse(doc.Get("Key"), CultureInfo.InvariantCulture);
             int packageRegistrationKey = Int32.Parse(doc.Get("PackageRegistrationKey"), CultureInfo.InvariantCulture);
             int packageSize = Int32.Parse(doc.Get("PackageFileSize"), CultureInfo.InvariantCulture);
@@ -360,7 +362,7 @@ namespace NuGetGallery
 
         private static bool IsDegenerateQuery(Query q)
         {
-            return q == null || (q is MatchAllDocsQuery) || ((q is BooleanQuery) && (q as BooleanQuery).Clauses.Count == 0);
+            return q == null || (q is MatchAllDocsQuery) || (q is BooleanQuery query && query.Clauses.Count == 0);
         }
 
         private static SortField GetSortField(SearchFilter searchFilter)

@@ -5,13 +5,13 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure.Interception;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Mail;
 using System.Security.Principal;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Hosting;
@@ -20,13 +20,15 @@ using AnglicanGeek.MarkdownMailer;
 using Autofac;
 using Autofac.Core;
 using Autofac.Extensions.DependencyInjection;
-using Elmah;
+using Ganss.Xss;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.ApplicationInsights.Extensibility.Implementation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
-using Microsoft.WindowsAzure.ServiceRuntime;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Protocols;
 using NuGet.Services.Configuration;
 using NuGet.Services.Entities;
 using NuGet.Services.FeatureFlags;
@@ -47,7 +49,7 @@ using NuGetGallery.Configuration;
 using NuGetGallery.Cookies;
 using NuGetGallery.Diagnostics;
 using NuGetGallery.Features;
-using NuGetGallery.Helpers;
+using NuGetGallery.Frameworks;
 using NuGetGallery.Infrastructure;
 using NuGetGallery.Infrastructure.Authentication;
 using NuGetGallery.Infrastructure.Lucene;
@@ -56,8 +58,8 @@ using NuGetGallery.Infrastructure.Search;
 using NuGetGallery.Infrastructure.Search.Correlation;
 using NuGetGallery.Security;
 using NuGetGallery.Services;
+using NuGetGallery.Services.Authentication;
 using Role = NuGet.Services.Entities.Role;
-using SecretReaderFactory = NuGetGallery.Configuration.SecretReader.SecretReaderFactory;
 
 namespace NuGetGallery
 {
@@ -68,6 +70,10 @@ namespace NuGetGallery
             public const string AsyncDeleteAccountName = "AsyncDeleteAccountService";
             public const string SyncDeleteAccountName = "SyncDeleteAccountService";
 
+            public const string PrimaryStatisticsKey = "PrimaryStatisticsKey";
+            public const string AlternateStatisticsKey = "AlternateStatisticsKey";
+            public const string FeatureFlaggedStatisticsKey = "FeatureFlaggedStatisticsKey";
+
             public const string AccountDeleterTopic = "AccountDeleterBindingKey";
             public const string PackageValidationTopic = "PackageValidationBindingKey";
             public const string SymbolsPackageValidationTopic = "SymbolsPackageValidationBindingKey";
@@ -76,6 +82,8 @@ namespace NuGetGallery
             public const string EmailPublisherTopic = "EmailPublisherBindingKey";
 
             public const string PreviewSearchClient = "PreviewSearchClientBindingKey";
+
+            public const string AuditKey = "AuditKey";
         }
 
         public static class ParameterNames
@@ -87,27 +95,25 @@ namespace NuGetGallery
         {
             var services = new ServiceCollection();
 
-            var configuration = new ConfigurationService();
-            var secretReaderFactory = new SecretReaderFactory(configuration);
-            var secretReader = secretReaderFactory.CreateSecretReader();
-            var secretInjector = secretReaderFactory.CreateSecretInjector(secretReader);
+            var configuration = ConfigurationService.Initialize();
+            var secretInjector = configuration.SecretInjector;
 
             builder.RegisterInstance(secretInjector)
                 .AsSelf()
                 .As<ISecretInjector>()
                 .SingleInstance();
 
-            configuration.SecretInjector = secretInjector;
-
             // Register the ILoggerFactory and configure AppInsights.
             var applicationInsightsConfiguration = ConfigureApplicationInsights(
                 configuration.Current,
                 out ITelemetryClient telemetryClient);
 
-            var loggerConfiguration = LoggingSetup.CreateDefaultLoggerConfiguration(withConsoleLogger: false);
+            var loggerConfiguration = LoggingSetup.CreateDefaultLoggerConfiguration(withConsoleLogger: false, withAssemblyMetadata: false);
             var loggerFactory = LoggingSetup.CreateLoggerFactory(
                 loggerConfiguration,
                 telemetryConfiguration: applicationInsightsConfiguration.TelemetryConfiguration);
+
+            ActionsRequiringPermissions.AdminAccessEnabled = configuration.Current.AdminPanelEnabled;
 
             builder.RegisterInstance(applicationInsightsConfiguration.TelemetryConfiguration)
                 .AsSelf()
@@ -126,8 +132,12 @@ namespace NuGetGallery
 
             services.AddSingleton(loggerFactory);
             services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+            services.AddSingleton<IHtmlSanitizer, HtmlSanitizer>();
 
             UrlHelperExtensions.SetConfigurationService(configuration);
+            builder.RegisterType<UrlHelperWrapper>()
+                .As<IUrlHelper>()
+                .InstancePerLifetimeScope();
 
             builder.RegisterInstance(configuration)
                 .AsSelf()
@@ -145,6 +155,8 @@ namespace NuGetGallery
 
             builder.Register(c => configuration.PackageDelete)
                 .As<IPackageDeleteConfiguration>();
+
+            ConfigureFederatedCredentials(builder, configuration);
 
             var telemetryService = new TelemetryService(
                 new TraceDiagnosticsSource(nameof(TelemetryService), telemetryClient),
@@ -172,6 +184,8 @@ namespace NuGetGallery
                 .As<ICacheService>()
                 .InstancePerLifetimeScope();
 
+            DbInterception.Add(new QueryHintInterceptor());
+
             var galleryDbConnectionFactory = CreateDbConnectionFactory(
                 loggerFactory,
                 nameof(EntitiesContext),
@@ -183,7 +197,7 @@ namespace NuGetGallery
                 .As<ISqlConnectionFactory>()
                 .SingleInstance();
 
-            builder.Register(c => new EntitiesContext(CreateDbConnection(galleryDbConnectionFactory), configuration.Current.ReadOnlyMode))
+            builder.Register(c => new EntitiesContext(CreateDbConnection(galleryDbConnectionFactory, telemetryService), configuration.Current.ReadOnlyMode))
                 .AsSelf()
                 .As<IEntitiesContext>()
                 .As<DbContext>()
@@ -230,9 +244,9 @@ namespace NuGetGallery
                 .InstancePerLifetimeScope();
 
             builder.RegisterType<EntityRepository<AccountDelete>>()
-               .AsSelf()
-               .As<IEntityRepository<AccountDelete>>()
-               .InstancePerLifetimeScope();
+                .AsSelf()
+                .As<IEntityRepository<AccountDelete>>()
+                .InstancePerLifetimeScope();
 
             builder.RegisterType<EntityRepository<Credential>>()
                 .AsSelf()
@@ -269,7 +283,17 @@ namespace NuGetGallery
                 .As<IEntityRepository<PackageRename>>()
                 .InstancePerLifetimeScope();
 
-            ConfigureGalleryReadOnlyReplicaEntitiesContext(builder, loggerFactory, configuration, secretInjector);
+            builder.RegisterType<EntityRepository<FederatedCredentialPolicy>>()
+                .AsSelf()
+                .As<IEntityRepository<FederatedCredentialPolicy>>()
+                .InstancePerLifetimeScope();
+
+            builder.RegisterType<EntityRepository<FederatedCredential>>()
+                .AsSelf()
+                .As<IEntityRepository<FederatedCredential>>()
+                .InstancePerLifetimeScope();
+
+            ConfigureGalleryReadOnlyReplicaEntitiesContext(builder, loggerFactory, configuration, secretInjector, telemetryService);
 
             var supportDbConnectionFactory = CreateDbConnectionFactory(
                 loggerFactory,
@@ -277,7 +301,7 @@ namespace NuGetGallery
                 configuration.Current.SqlConnectionStringSupportRequest,
                 secretInjector);
 
-            builder.Register(c => new SupportRequestDbContext(CreateDbConnection(supportDbConnectionFactory)))
+            builder.Register(c => new SupportRequestDbContext(CreateDbConnection(supportDbConnectionFactory, telemetryService)))
                 .AsSelf()
                 .As<ISupportRequestDbContext>()
                 .InstancePerLifetimeScope();
@@ -342,6 +366,10 @@ namespace NuGetGallery
                 .As<ISymbolPackageService>()
                 .InstancePerLifetimeScope();
 
+            builder.RegisterType<PackageMetadataValidationService>()
+                .As<IPackageMetadataValidationService>()
+                .InstancePerLifetimeScope();
+
             builder.RegisterType<PackageUploadService>()
                 .AsSelf()
                 .As<IPackageUploadService>()
@@ -367,6 +395,14 @@ namespace NuGetGallery
                 .As<IReadMeService>()
                 .InstancePerLifetimeScope();
 
+            builder.RegisterType<MarkdownService>()
+                .As<IMarkdownService>()
+                .InstancePerLifetimeScope();
+
+            builder.RegisterType<ImageDomainValidator>()
+                .As<IImageDomainValidator>()
+                .InstancePerLifetimeScope();
+
             builder.RegisterType<ApiScopeEvaluator>()
                 .AsSelf()
                 .As<IApiScopeEvaluator>()
@@ -386,6 +422,8 @@ namespace NuGetGallery
                 .AsSelf()
                 .As<ICertificateService>()
                 .InstancePerLifetimeScope();
+
+            RegisterTyposquattingServiceHelper(builder, loggerFactory);
 
             builder.RegisterType<TyposquattingService>()
                 .AsSelf()
@@ -417,6 +455,10 @@ namespace NuGetGallery
                 .As<IPackageDeprecationService>()
                 .InstancePerLifetimeScope();
 
+            builder.RegisterType<PackageVulnerabilitiesService>()
+                .As<IPackageVulnerabilitiesService>()
+                .InstancePerLifetimeScope();
+
             builder.RegisterType<PackageRenameService>()
                 .As<IPackageRenameService>()
                 .InstancePerLifetimeScope();
@@ -437,9 +479,19 @@ namespace NuGetGallery
                 .As<IIconUrlTemplateProcessor>()
                 .InstancePerLifetimeScope();
 
-            builder.RegisterType<PackageVulnerabilityService>()
-                .As<IPackageVulnerabilityService>()
+            builder.RegisterType<PackageVulnerabilitiesManagementService>()
+                .As<IPackageVulnerabilitiesManagementService>()
                 .InstancePerLifetimeScope();
+
+            builder.RegisterType<PackageVulnerabilitiesCacheService>()
+                .AsSelf()
+                .As<IPackageVulnerabilitiesCacheService>()
+                .SingleInstance();
+
+            builder.RegisterType<PackageFrameworkCompatibilityFactory>()
+                .AsSelf()
+                .As<IPackageFrameworkCompatibilityFactory>()
+                .SingleInstance();
 
             services.AddHttpClient();
             services.AddScoped<IGravatarProxyService, GravatarProxyService>();
@@ -452,26 +504,26 @@ namespace NuGetGallery
                 .As<IPrincipal>()
                 .InstancePerLifetimeScope();
 
-            IAuditingService defaultAuditingService = null;
-
             switch (configuration.Current.StorageType)
             {
                 case StorageType.FileSystem:
                 case StorageType.NotSpecified:
                     ConfigureForLocalFileSystem(builder, configuration);
-                    defaultAuditingService = GetAuditingServiceForLocalFileSystem(configuration);
                     break;
                 case StorageType.AzureStorage:
                     ConfigureForAzureStorage(builder, configuration, telemetryService);
-                    defaultAuditingService = GetAuditingServiceForAzureStorage(builder, configuration);
                     break;
             }
 
-            RegisterAsynchronousValidation(builder, loggerFactory, configuration, secretInjector);
+            RegisterAsynchronousValidation(builder, loggerFactory, configuration, secretInjector, telemetryService);
 
-            RegisterAuditingServices(builder, defaultAuditingService);
+            RegisterAuditingServices(builder, configuration.Current.StorageType);
 
-            RegisterCookieComplianceService(builder, configuration, diagnosticsService);
+            RegisterCookieComplianceService(configuration, loggerFactory);
+
+            builder.RegisterType<CookieExpirationService>()
+                .As<ICookieExpirationService>()
+                .SingleInstance();
 
             RegisterABTestServices(builder);
 
@@ -494,6 +546,88 @@ namespace NuGetGallery
 
             ConfigureAutocomplete(builder, configuration);
             builder.Populate(services);
+        }
+
+        private static void ConfigureFederatedCredentials(ContainerBuilder builder, ConfigurationService configuration)
+        {
+            builder
+                .RegisterType<FederatedCredentialRepository>()
+                .As<IFederatedCredentialRepository>()
+                .InstancePerLifetimeScope();
+
+            builder
+                .Register(c => configuration.FederatedCredential)
+                .As<IFederatedCredentialConfiguration>();
+
+            builder
+                .Register(_ => new OpenIdConnectConfigurationRetriever())
+                .As<IConfigurationRetriever<OpenIdConnectConfiguration>>();
+
+            // Register EntraID-specific OIDC configuration manager
+            const string EntraIdKey = "EntraId";
+            builder
+                .Register(p => new ConfigurationManager<OpenIdConnectConfiguration>(
+                    metadataAddress: EntraIdTokenPolicyValidator.MetadataAddress,
+                    p.Resolve<IConfigurationRetriever<OpenIdConnectConfiguration>>()))
+                .SingleInstance()
+                .Keyed<ConfigurationManager<OpenIdConnectConfiguration>>(EntraIdKey);
+
+            // Register GitHub-specific OIDC configuration manager
+            const string GitHubActionsKey = "GitHubActions";
+            builder
+                .Register(p => new ConfigurationManager<OpenIdConnectConfiguration>(
+                    metadataAddress: GitHubTokenPolicyValidator.MetadataAddress,
+                    p.Resolve<IConfigurationRetriever<OpenIdConnectConfiguration>>()))
+                .SingleInstance()
+                .Keyed<ConfigurationManager<OpenIdConnectConfiguration>>(GitHubActionsKey);
+
+            builder
+                .RegisterType<JsonWebTokenHandler>()
+                .InstancePerLifetimeScope();
+
+            builder
+                .Register(c =>
+                {
+                    var configurationFactory = c.Resolve<IConfigurationFactory>();
+                    return GetAddInServices<IFederatedCredentialValidator>(sp =>
+                    {
+                        sp.ComposeExportedValue(configurationFactory);
+                    }).ToList();
+                })
+                .As<IReadOnlyList<IFederatedCredentialValidator>>() // a singleton, materialized list
+                .InstancePerLifetimeScope();
+
+            // Register individual validators
+            builder
+                .Register(c => new EntraIdTokenPolicyValidator(
+                    c.ResolveKeyed<ConfigurationManager<OpenIdConnectConfiguration>>(EntraIdKey),
+                    c.Resolve<IFederatedCredentialConfiguration>(),
+                    c.Resolve<IFeatureFlagService>(),
+                    c.Resolve<JsonWebTokenHandler>()))
+                .As<ITokenPolicyValidator>()
+                .InstancePerLifetimeScope();
+
+            builder
+                .Register(c => new GitHubTokenPolicyValidator(
+                    c.Resolve<IFederatedCredentialRepository>(),
+                    c.ResolveKeyed<ConfigurationManager<OpenIdConnectConfiguration>>(GitHubActionsKey),
+                    c.Resolve<IFederatedCredentialConfiguration>(),
+                    c.Resolve<IAuditingService>(),
+                    c.Resolve<IFeatureFlagService>(),
+                    c.Resolve<JsonWebTokenHandler>()
+                    ))
+                .As<ITokenPolicyValidator>()
+                .InstancePerLifetimeScope();
+
+            builder
+                .RegisterType<FederatedCredentialPolicyEvaluator>()
+                .As<IFederatedCredentialPolicyEvaluator>()
+                .InstancePerLifetimeScope();
+
+            builder
+                .RegisterType<FederatedCredentialService>()
+                .As<IFederatedCredentialService>()
+                .InstancePerLifetimeScope();
         }
 
         // Internal for testing purposes
@@ -520,19 +654,6 @@ namespace NuGetGallery
             var telemetryConfiguration = applicationInsightsConfiguration.TelemetryConfiguration;
 
             // Add enrichers
-            try
-            {
-                if (RoleEnvironment.IsAvailable)
-                {
-                    telemetryConfiguration.TelemetryInitializers.Add(
-                        new DeploymentIdTelemetryEnricher(RoleEnvironment.DeploymentId));
-                }
-            }
-            catch
-            {
-                // This likely means the cloud service runtime is not available.
-            }
-
             if (configuration.DeploymentLabel != null)
             {
                 telemetryConfiguration.TelemetryInitializers.Add(new DeploymentLabelEnricher(configuration.DeploymentLabel));
@@ -575,8 +696,6 @@ namespace NuGetGallery
             }
 
             telemetryConfiguration.TelemetryProcessorChainBuilder.Build();
-
-            QuietLog.UseTelemetryClient(telemetryClientWrapper);
 
             telemetryClient = telemetryClientWrapper;
 
@@ -685,16 +804,101 @@ namespace NuGetGallery
             }
         }
 
+        private static void RegisterStatisticsServices(ContainerBuilder builder, IGalleryConfigurationService configuration)
+        {
+            // when running on Windows Azure, download counts come from the downloads.v1.json blob
+            builder.Register(c => new SimpleBlobStorageConfiguration(
+                    configuration.Current.AzureStorage_Statistics_ConnectionString,
+                    configuration.Current.AzureStorageReadAccessGeoRedundant,
+                    configuration.Current.AzureStorageUseMsi,
+                    configuration.Current.AzureStorageMsiClientId))
+                .SingleInstance()
+                .Keyed<IBlobStorageConfiguration>(BindingKeys.PrimaryStatisticsKey);
+
+            builder.Register(c => new SimpleBlobStorageConfiguration(
+                    configuration.Current.AzureStorage_Statistics_ConnectionString_Alternate,
+                    configuration.Current.AzureStorageReadAccessGeoRedundant,
+                    configuration.Current.AzureStorageUseMsi,
+                    configuration.Current.AzureStorageMsiClientId))
+                .SingleInstance()
+                .Keyed<IBlobStorageConfiguration>(BindingKeys.AlternateStatisticsKey);
+
+            builder.Register(c =>
+                {
+                    var blobConfiguration = c.ResolveKeyed<IBlobStorageConfiguration>(BindingKeys.PrimaryStatisticsKey);
+                    return CreateCloudBlobClientWrapper(
+                        blobConfiguration.ConnectionString,
+                        blobConfiguration.UseMsi,
+                        blobConfiguration.MsiClientId,
+                        blobConfiguration.ReadAccessGeoRedundant);
+                })
+                .SingleInstance()
+                .Keyed<ICloudBlobClient>(BindingKeys.PrimaryStatisticsKey);
+
+            builder.Register(c =>
+                {
+                    var blobConfiguration = c.ResolveKeyed<IBlobStorageConfiguration>(BindingKeys.AlternateStatisticsKey);
+                    return CreateCloudBlobClientWrapper(
+                        blobConfiguration.ConnectionString,
+                        blobConfiguration.UseMsi,
+                        blobConfiguration.MsiClientId,
+                        blobConfiguration.ReadAccessGeoRedundant);
+                })
+                .SingleInstance()
+                .Keyed<ICloudBlobClient>(BindingKeys.AlternateStatisticsKey);
+
+            var hasSecondaryStatisticsSource = !string.IsNullOrWhiteSpace(configuration.Current.AzureStorage_Statistics_ConnectionString_Alternate);
+
+            builder.Register(c =>
+                {
+                    if (hasSecondaryStatisticsSource && c.Resolve<IFeatureFlagService>().IsAlternateStatisticsSourceEnabled())
+                    {
+                        return c.ResolveKeyed<ICloudBlobClient>(BindingKeys.AlternateStatisticsKey);
+                    }
+                    return c.ResolveKeyed<ICloudBlobClient>(BindingKeys.PrimaryStatisticsKey);
+                })
+                .Keyed<ICloudBlobClient>(BindingKeys.FeatureFlaggedStatisticsKey);
+
+            // when running on Windows Azure, we use a back-end job to calculate stats totals and store in the blobs
+            builder.Register(c => new JsonAggregateStatsService(c.ResolveKeyed<Func<ICloudBlobClient>>(BindingKeys.FeatureFlaggedStatisticsKey)))
+                .As<IAggregateStatsService>()
+                .SingleInstance();
+
+            // when running on Windows Azure, pull the statistics from the warehouse via storage
+            builder.Register(c => new CloudReportService(c.ResolveKeyed<Func<ICloudBlobClient>>(BindingKeys.FeatureFlaggedStatisticsKey)))
+                .As<IReportService>()
+                .SingleInstance();
+
+            builder.Register(c =>
+                {
+                    var cloudBlobClientFactory = c.ResolveKeyed<Func<ICloudBlobClient>>(BindingKeys.FeatureFlaggedStatisticsKey);
+                    var telemetryService = c.Resolve<ITelemetryService>();
+                    var downloadCountServiceLogger = c.Resolve<ILogger<CloudDownloadCountService>>();
+                    var downloadCountService = new CloudDownloadCountService(telemetryService, cloudBlobClientFactory, downloadCountServiceLogger);
+
+                    var dlCountInterceptor = new DownloadCountObjectMaterializedInterceptor(downloadCountService, telemetryService);
+                    ObjectMaterializedInterception.AddInterceptor(dlCountInterceptor);
+
+                    return downloadCountService;
+                })
+                .As<IDownloadCountService>()
+                .SingleInstance();
+
+            builder.RegisterType<JsonStatisticsService>()
+                .As<IStatisticsService>()
+                .SingleInstance();
+        }
+
         private static void RegisterSwitchingDeleteAccountService(ContainerBuilder builder, ConfigurationService configuration)
         {
             var asyncAccountDeleteConnectionString = configuration.ServiceBus.AccountDeleter_ConnectionString;
             var asyncAccountDeleteTopicName = configuration.ServiceBus.AccountDeleter_TopicName;
 
             builder
-                .Register(c => new TopicClientWrapper(asyncAccountDeleteConnectionString, asyncAccountDeleteTopicName))
+                .Register(c => new TopicClientWrapper(asyncAccountDeleteConnectionString, asyncAccountDeleteTopicName, configuration.ServiceBus.ManagedIdentityClientId))
                 .SingleInstance()
                 .Keyed<ITopicClient>(BindingKeys.AccountDeleterTopic)
-                .OnRelease(x => x.Close());
+                .OnRelease(x => _ = x.CloseAsync());
 
             builder
                 .RegisterType<AsynchronousDeleteAccountService>()
@@ -826,11 +1030,11 @@ namespace NuGetGallery
             var emailPublisherTopicName = configuration.ServiceBus.EmailPublisher_TopicName;
 
             builder
-                .Register(c => new TopicClientWrapper(emailPublisherConnectionString, emailPublisherTopicName))
+                .Register(c => new TopicClientWrapper(emailPublisherConnectionString, emailPublisherTopicName, configuration.ServiceBus.ManagedIdentityClientId))
                 .As<ITopicClient>()
                 .SingleInstance()
                 .Keyed<ITopicClient>(BindingKeys.EmailPublisherTopic)
-                .OnRelease(x => x.Close());
+                .OnRelease(x => _ = x.CloseAsync());
 
             builder
                 .RegisterType<EmailMessageEnqueuer>()
@@ -849,22 +1053,33 @@ namespace NuGetGallery
             ILoggerFactory loggerFactory,
             string name,
             string connectionString,
-            ISecretInjector secretInjector)
+            ICachingSecretInjector secretInjector)
         {
             var logger = loggerFactory.CreateLogger($"AzureSqlConnectionFactory-{name}");
             return new AzureSqlConnectionFactory(connectionString, secretInjector, logger);
         }
 
-        private static DbConnection CreateDbConnection(ISqlConnectionFactory connectionFactory)
+        public static DbConnection CreateDbConnection(ISqlConnectionFactory connectionFactory, ITelemetryService telemetryService)
         {
-            return Task.Run(() => connectionFactory.CreateAsync()).Result;
+            using (telemetryService.TrackSyncSqlConnectionCreationDuration())
+            {
+                if (connectionFactory.TryCreate(out var connection))
+                {
+                    return connection;
+                }
+            }
+            using (telemetryService.TrackAsyncSqlConnectionCreationDuration())
+            {
+                return Task.Run(() => connectionFactory.CreateAsync()).Result;
+            }
         }
 
         private static void ConfigureGalleryReadOnlyReplicaEntitiesContext(
             ContainerBuilder builder,
             ILoggerFactory loggerFactory,
             ConfigurationService configuration,
-            ISecretInjector secretInjector)
+            ICachingSecretInjector secretInjector,
+            ITelemetryService telemetryService)
         {
             var galleryDbReadOnlyReplicaConnectionFactory = CreateDbConnectionFactory(
                 loggerFactory,
@@ -872,7 +1087,7 @@ namespace NuGetGallery
                 configuration.Current.SqlReadOnlyReplicaConnectionString ?? configuration.Current.SqlConnectionString,
                 secretInjector);
 
-            builder.Register(c => new ReadOnlyEntitiesContext(CreateDbConnection(galleryDbReadOnlyReplicaConnectionFactory)))
+            builder.Register(c => new ReadOnlyEntitiesContext(CreateDbConnection(galleryDbReadOnlyReplicaConnectionFactory, telemetryService)))
                 .As<IReadOnlyEntitiesContext>()
                 .InstancePerLifetimeScope();
 
@@ -885,7 +1100,8 @@ namespace NuGetGallery
             ContainerBuilder builder,
             ILoggerFactory loggerFactory,
             ConfigurationService configuration,
-            ISecretInjector secretInjector)
+            ICachingSecretInjector secretInjector,
+            ITelemetryService telemetryService)
         {
             var validationDbConnectionFactory = CreateDbConnectionFactory(
                 loggerFactory,
@@ -893,7 +1109,7 @@ namespace NuGetGallery
                 configuration.Current.SqlConnectionStringValidation,
                 secretInjector);
 
-            builder.Register(c => new ValidationEntitiesContext(CreateDbConnection(validationDbConnectionFactory)))
+            builder.Register(c => new ValidationEntitiesContext(CreateDbConnection(validationDbConnectionFactory, telemetryService)))
                 .AsSelf()
                 .InstancePerLifetimeScope();
 
@@ -914,7 +1130,8 @@ namespace NuGetGallery
             ContainerBuilder builder,
             ILoggerFactory loggerFactory,
             ConfigurationService configuration,
-            ISecretInjector secretInjector)
+            ICachingSecretInjector secretInjector,
+            ITelemetryService telemetryService)
         {
             builder
                 .RegisterType<NuGet.Services.Validation.ServiceBusMessageSerializer>()
@@ -940,7 +1157,7 @@ namespace NuGetGallery
 
             if (configuration.Current.AsynchronousPackageValidationEnabled)
             {
-                ConfigureValidationEntitiesContext(builder, loggerFactory, configuration, secretInjector);
+                ConfigureValidationEntitiesContext(builder, loggerFactory, configuration, secretInjector, telemetryService);
 
                 builder
                     .Register(c =>
@@ -968,18 +1185,18 @@ namespace NuGetGallery
                 var symbolsValidationTopicName = configuration.ServiceBus.SymbolsValidation_TopicName;
 
                 builder
-                    .Register(c => new TopicClientWrapper(validationConnectionString, validationTopicName))
+                    .Register(c => new TopicClientWrapper(validationConnectionString, validationTopicName, configuration.ServiceBus.ManagedIdentityClientId))
                     .As<ITopicClient>()
                     .SingleInstance()
                     .Keyed<ITopicClient>(BindingKeys.PackageValidationTopic)
-                    .OnRelease(x => x.Close());
+                    .OnRelease(x => _ = x.CloseAsync());
 
                 builder
-                    .Register(c => new TopicClientWrapper(symbolsValidationConnectionString, symbolsValidationTopicName))
+                    .Register(c => new TopicClientWrapper(symbolsValidationConnectionString, symbolsValidationTopicName, configuration.ServiceBus.ManagedIdentityClientId))
                     .As<ITopicClient>()
                     .SingleInstance()
                     .Keyed<ITopicClient>(BindingKeys.SymbolsPackageValidationTopic)
-                    .OnRelease(x => x.Close());
+                    .OnRelease(x => _ = x.CloseAsync());
             }
             else
             {
@@ -1088,7 +1305,9 @@ namespace NuGetGallery
                     c.Resolve<ITelemetryService>(),
                     c.Resolve<IMessageService>(),
                     c.Resolve<IMessageServiceConfiguration>(),
-                    c.Resolve<IIconUrlProvider>()))
+                    c.Resolve<IIconUrlProvider>(),
+                    c.Resolve<IPackageFrameworkCompatibilityFactory>(),
+                    c.Resolve<IFeatureFlagService>()))
                 .As<ISearchSideBySideService>()
                 .InstancePerLifetimeScope();
 
@@ -1288,19 +1507,15 @@ namespace NuGetGallery
                 .As<IAggregateStatsService>()
                 .InstancePerLifetimeScope();
 
-            builder.RegisterInstance(new SqlErrorLog(configuration.Current.SqlConnectionString))
-                .As<ErrorLog>()
-                .SingleInstance();
-
             builder.RegisterType<GalleryContentFileMetadataService>()
                 .As<IContentFileMetadataService>()
                 .SingleInstance();
         }
 
-        private static IAuditingService GetAuditingServiceForLocalFileSystem(IGalleryConfigurationService configuration)
+        private static IAuditingService GetAuditingServiceForLocalFileSystem(IAppConfiguration configuration)
         {
             var auditingPath = Path.Combine(
-                FileSystemFileStorageService.ResolvePath(configuration.Current.FileStorageDirectory),
+                FileSystemFileStorageService.ResolvePath(configuration.FileStorageDirectory),
                 FileSystemAuditingService.DefaultContainerName);
 
             return new FileSystemAuditingService(auditingPath, AuditActor.GetAspNetOnBehalfOfAsync);
@@ -1319,18 +1534,23 @@ namespace NuGetGallery
             {
                 if (completedBindingKeys.Add(dependent.BindingKey))
                 {
-                    builder.RegisterInstance(new CloudBlobClientWrapper(dependent.AzureStorageConnectionString, configuration.Current.AzureStorageReadAccessGeoRedundant))
-                       .AsSelf()
-                       .As<ICloudBlobClient>()
-                       .SingleInstance()
-                       .Keyed<ICloudBlobClient>(dependent.BindingKey);
+                    CloudBlobClientWrapper blobClient = CreateCloudBlobClientWrapper(
+                        dependent.AzureStorageConnectionString,
+                        configuration.Current.AzureStorageUseMsi,
+                        configuration.Current.AzureStorageMsiClientId,
+                        configuration.Current.AzureStorageReadAccessGeoRedundant);
+                    builder.RegisterInstance(blobClient)
+                        .AsSelf()
+                        .As<ICloudBlobClient>()
+                        .SingleInstance()
+                        .Keyed<ICloudBlobClient>(dependent.BindingKey);
 
                     // Do not register the service as ICloudStorageStatusDependency because
                     // the CloudAuditingService registers it and the gallery uses the same storage account for all the containers.
                     builder.RegisterType<CloudBlobFileStorageService>()
                         .WithParameter(new ResolvedParameter(
-                           (pi, ctx) => pi.ParameterType == typeof(ICloudBlobClient),
-                           (pi, ctx) => ctx.ResolveKeyed<ICloudBlobClient>(dependent.BindingKey)))
+                            (pi, ctx) => pi.ParameterType == typeof(ICloudBlobClient),
+                            (pi, ctx) => ctx.ResolveKeyed<ICloudBlobClient>(dependent.BindingKey)))
                         .AsSelf()
                         .As<IFileStorageService>()
                         .As<ICoreFileStorageService>()
@@ -1355,57 +1575,45 @@ namespace NuGetGallery
                 }
             }
 
-            // when running on Windows Azure, we use a back-end job to calculate stats totals and store in the blobs
-            builder.RegisterInstance(new JsonAggregateStatsService(configuration.Current.AzureStorage_Statistics_ConnectionString, configuration.Current.AzureStorageReadAccessGeoRedundant))
-                .AsSelf()
-                .As<IAggregateStatsService>()
-                .SingleInstance();
-
-            // when running on Windows Azure, pull the statistics from the warehouse via storage
-            builder.RegisterInstance(new CloudReportService(configuration.Current.AzureStorage_Statistics_ConnectionString, configuration.Current.AzureStorageReadAccessGeoRedundant))
-                .AsSelf()
-                .As<IReportService>()
-                .SingleInstance();
-
-            // when running on Windows Azure, download counts come from the downloads.v1.json blob
-            var downloadCountService = new CloudDownloadCountService(
-                telemetryService,
-                configuration.Current.AzureStorage_Statistics_ConnectionString,
-                configuration.Current.AzureStorageReadAccessGeoRedundant);
-
-            builder.RegisterInstance(downloadCountService)
-                .AsSelf()
-                .As<IDownloadCountService>()
-                .SingleInstance();
-            ObjectMaterializedInterception.AddInterceptor(new DownloadCountObjectMaterializedInterceptor(downloadCountService, telemetryService));
-
-            builder.RegisterType<JsonStatisticsService>()
-                .AsSelf()
-                .As<IStatisticsService>()
-                .SingleInstance();
-
-            builder.RegisterInstance(new TableErrorLog(configuration.Current.AzureStorage_Errors_ConnectionString, configuration.Current.AzureStorageReadAccessGeoRedundant))
-                .As<ErrorLog>()
-                .SingleInstance();
+            RegisterStatisticsServices(builder, configuration);
 
             builder.RegisterType<FlatContainerContentFileMetadataService>()
                 .As<IContentFileMetadataService>()
                 .SingleInstance();
         }
 
-        private static IAuditingService GetAuditingServiceForAzureStorage(ContainerBuilder builder, IGalleryConfigurationService configuration)
+        private static CloudBlobClientWrapper CreateCloudBlobClientWrapper(
+            string connectionString,
+            bool useMsi,
+            string msiClientId,
+            bool useStorageReadAccessGeoRedundant)
         {
-            string instanceId = HostMachine.Name;
-
-            var localIp = AuditActor.GetLocalIpAddressAsync().Result;
-
-            var service = new CloudAuditingService(instanceId, localIp, configuration.Current.AzureStorage_Auditing_ConnectionString, configuration.Current.AzureStorageReadAccessGeoRedundant, AuditActor.GetAspNetOnBehalfOfAsync);
-
-            builder.RegisterInstance(service)
-                .As<ICloudStorageStatusDependency>()
-                .SingleInstance();
-
-            return service;
+            if (!useMsi)
+            {
+                return new CloudBlobClientWrapper(connectionString, useStorageReadAccessGeoRedundant);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(msiClientId))
+                {
+#if DEBUG
+                    return CloudBlobClientWrapper.UsingDefaultAzureCredential(
+                        connectionString,
+                        readAccessGeoRedundant: useStorageReadAccessGeoRedundant);
+#else
+                    return CloudBlobClientWrapper.UsingMsi(
+                        connectionString,
+                        readAccessGeoRedundant: useStorageReadAccessGeoRedundant);
+#endif
+                }
+                else
+                {
+                    return CloudBlobClientWrapper.UsingMsi(
+                        connectionString,
+                        msiClientId,
+                        useStorageReadAccessGeoRedundant);
+                }
+            }
         }
 
         private static IAuditingService CombineAuditingServices(IEnumerable<IAuditingService> services)
@@ -1439,47 +1647,105 @@ namespace NuGetGallery
             }
         }
 
-        private static void RegisterAuditingServices(ContainerBuilder builder, IAuditingService defaultAuditingService)
+        private static void RegisterAuditingServices(ContainerBuilder builder, string storageType)
         {
-            var auditingServices = GetAddInServices<IAuditingService>();
-            var services = new List<IAuditingService>(auditingServices);
-
-            if (defaultAuditingService != null)
+            if (storageType == StorageType.AzureStorage)
             {
-                services.Add(defaultAuditingService);
+                builder.Register(c =>
+                    {
+                        var configuration = c.Resolve<IAppConfiguration>();
+                        return CreateCloudBlobClientWrapper(
+                            configuration.AzureStorage_Auditing_ConnectionString,
+                            configuration.AzureStorageUseMsi,
+                            configuration.AzureStorageMsiClientId,
+                            configuration.AzureStorageReadAccessGeoRedundant);
+                    })
+                    .SingleInstance()
+                    .Keyed<ICloudBlobClient>(BindingKeys.AuditKey);
+
+                builder.Register(c =>
+                    {
+                        var blobClientFactory = c.ResolveKeyed<Func<ICloudBlobClient>>(BindingKeys.AuditKey);
+                        return new CloudAuditingService(blobClientFactory, AuditActor.GetAspNetOnBehalfOfAsync);
+                    })
+                    .SingleInstance()
+                    .AsSelf()
+                    .As<ICloudStorageStatusDependency>();
             }
 
-            var service = CombineAuditingServices(services);
+            builder.Register(c =>
+                {
+                    var configuration = c.Resolve<IAppConfiguration>();
+                    IAuditingService defaultAuditingService = null;
+                    switch (storageType)
+                    {
+                        case StorageType.FileSystem:
+                        case StorageType.NotSpecified:
+                            defaultAuditingService = GetAuditingServiceForLocalFileSystem(configuration);
+                            break;
 
-            builder.RegisterInstance(service)
+                        case StorageType.AzureStorage:
+                            defaultAuditingService = c.Resolve<CloudAuditingService>();
+                            break;
+                    }
+
+                    var auditingServices = GetAddInServices<IAuditingService>();
+                    var services = new List<IAuditingService>(auditingServices);
+
+                    if (defaultAuditingService != null)
+                    {
+                        services.Add(defaultAuditingService);
+                    }
+
+                    return CombineAuditingServices(services);
+                })
                 .AsSelf()
                 .As<IAuditingService>()
                 .SingleInstance();
         }
 
-        private static void RegisterCookieComplianceService(ContainerBuilder builder, ConfigurationService configuration, DiagnosticsService diagnostics)
+        private static void RegisterCookieComplianceService(ConfigurationService configuration, ILoggerFactory loggerFactory)
         {
-            CookieComplianceServiceBase service = null;
+            var logger = loggerFactory.CreateLogger(nameof(CookieComplianceService));
+
+            ICookieComplianceService service = null;
             if (configuration.Current.IsHosted)
             {
                 var siteName = configuration.GetSiteRoot(true);
                 service = GetAddInServices<ICookieComplianceService>(sp =>
                 {
-                    sp.ComposeExportedValue("Domain", siteName);
-                    sp.ComposeExportedValue<IDiagnosticsService>(diagnostics);
-                }).FirstOrDefault() as CookieComplianceServiceBase;
-
-                if (service != null)
-                {
-                    // Initialize the service on App_Start to avoid any performance degradation during initial requests.
-                    HostingEnvironment.QueueBackgroundWorkItem(async cancellationToken => await service.InitializeAsync(siteName, diagnostics, cancellationToken));
-                }
+                    sp.ComposeExportedValue<ILogger>(logger);
+                }).FirstOrDefault();
             }
 
-            builder.RegisterInstance(service ?? new NullCookieComplianceService())
-                .AsSelf()
-                .As<ICookieComplianceService>()
-                .SingleInstance();
+            CookieComplianceService.Initialize(service ?? new NullCookieComplianceService(), logger);
+        }
+
+        private static void RegisterTyposquattingServiceHelper(ContainerBuilder builder, ILoggerFactory loggerFactory)
+        {
+            var logger = loggerFactory.CreateLogger(nameof(ITyposquattingServiceHelper));
+
+            builder.Register(c =>
+            {
+                var typosquattingService = GetAddInServices<ITyposquattingServiceHelper>(sp =>
+                {
+                    sp.ComposeExportedValue<ILogger>(logger);
+                }).FirstOrDefault();
+
+                if (typosquattingService == null)
+                {
+                    typosquattingService = new ExactMatchTyposquattingServiceHelper();
+                    logger.LogInformation("No typosquatting service helper was found, using ExactMatchTyposquattingServiceHelper instead.");
+                }
+                else
+                {
+                    logger.LogInformation("ITyposquattingServiceHelper found.");
+                }
+
+                return typosquattingService;
+            })
+            .As<ITyposquattingServiceHelper>()
+            .SingleInstance();
         }
     }
 }

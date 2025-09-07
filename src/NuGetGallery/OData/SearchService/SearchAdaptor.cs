@@ -25,32 +25,61 @@ namespace NuGetGallery.OData
         ///     Determines the maximum number of packages returned in a single page of an OData result.
         /// </summary>
         internal const int MaxPageSize = 100;
-
-        public static SearchFilter GetSearchFilter(string q, int page, bool includePrerelease, string sortOrder, string context, string semVerLevel)
+        private static readonly IReadOnlyDictionary<string, SortOrder> SortOrders = new Dictionary<string, SortOrder>(StringComparer.OrdinalIgnoreCase)
         {
+            { GalleryConstants.AlphabeticSortOrder, SortOrder.TitleAscending },
+            { GalleryConstants.SearchSortNames.TitleAsc, SortOrder.TitleAscending },
+            { GalleryConstants.SearchSortNames.TitleDesc, SortOrder.TitleDescending },
+            { GalleryConstants.RecentSortOrder, SortOrder.Published },
+            { GalleryConstants.SearchSortNames.Published, SortOrder.Published },
+            { GalleryConstants.SearchSortNames.LastEdited, SortOrder.LastEdited },
+            { GalleryConstants.SearchSortNames.CreatedAsc, SortOrder.CreatedAscending },
+            { GalleryConstants.SearchSortNames.CreatedDesc, SortOrder.CreatedDescending },
+            { GalleryConstants.SearchSortNames.TotalDownloadsAsc, SortOrder.TotalDownloadsAscending },
+            { GalleryConstants.SearchSortNames.TotalDownloadsDesc, SortOrder.TotalDownloadsDescending },
+        };
+
+        public static SearchFilter GetSearchFilter(
+            string q,
+            int page,
+            bool includePrerelease,
+            string frameworks,
+            string tfms,
+            bool includeComputedFrameworks,
+            string frameworkFilterMode,
+            string packageType,
+            string sortOrder,
+            string context,
+            string semVerLevel,
+            bool includeTestData)
+        {
+            page = page < 1 ? 1 : page; // pages are 1-based. 
+            frameworks = frameworks ?? string.Empty;
+            tfms = tfms ?? string.Empty;
+            frameworkFilterMode = frameworkFilterMode ?? "all";
+            packageType = packageType ?? string.Empty;
+
             var searchFilter = new SearchFilter(context)
             {
                 SearchTerm = q,
-                Skip = (page - 1) * GalleryConstants.DefaultPackageListPageSize, // pages are 1-based. 
+                Skip = (page - 1) * GalleryConstants.DefaultPackageListPageSize,
                 Take = GalleryConstants.DefaultPackageListPageSize,
                 IncludePrerelease = includePrerelease,
-                SemVerLevel = semVerLevel
+                SemVerLevel = semVerLevel,
+                Frameworks = frameworks,
+                Tfms = tfms,
+                IncludeComputedFrameworks = includeComputedFrameworks,
+                FrameworkFilterMode = frameworkFilterMode,
+                PackageType = packageType,
+                IncludeTestData = includeTestData,
             };
 
-            switch (sortOrder)
+            if (sortOrder == null || !SortOrders.TryGetValue(sortOrder, out var sortOrderValue))
             {
-                case GalleryConstants.AlphabeticSortOrder:
-                    searchFilter.SortOrder = SortOrder.TitleAscending;
-                    break;
-
-                case GalleryConstants.RecentSortOrder:
-                    searchFilter.SortOrder = SortOrder.Published;
-                    break;
-
-                default:
-                    searchFilter.SortOrder = SortOrder.Relevance;
-                    break;
+                sortOrderValue = SortOrder.Relevance;
             }
+
+            searchFilter.SortOrder = sortOrderValue;
 
             return searchFilter;
         }
@@ -336,7 +365,7 @@ namespace NuGetGallery.OData
             foreach (var queryParameter in queryParametersCollection)
             {
                 queryBuilder.Append(Uri.EscapeDataString(queryParameter.Key));
-                queryBuilder.Append("=");
+                queryBuilder.Append('=');
                 if (queryParameter.Value != null)
                 {
                     if (queryParameter.Value is string)
@@ -352,7 +381,7 @@ namespace NuGetGallery.OData
                         queryBuilder.Append(queryParameter.Value.ToString().ToLowerInvariant());
                     }
                 }
-                queryBuilder.Append("&");
+                queryBuilder.Append('&');
             }
 
             if (options.SelectExpand != null)
@@ -361,13 +390,13 @@ namespace NuGetGallery.OData
                 {
                     queryBuilder.Append("$select=");
                     queryBuilder.Append(options.SelectExpand.RawSelect);
-                    queryBuilder.Append("&");
+                    queryBuilder.Append('&');
                 }
                 if (!string.IsNullOrEmpty(options.SelectExpand.RawExpand))
                 {
                     queryBuilder.Append("$expand=");
                     queryBuilder.Append(options.SelectExpand.RawExpand);
-                    queryBuilder.Append("&");
+                    queryBuilder.Append('&');
                 }
             }
 
@@ -375,28 +404,28 @@ namespace NuGetGallery.OData
             {
                 queryBuilder.Append("$filter=");
                 queryBuilder.Append(options.Filter.RawValue);
-                queryBuilder.Append("&");
+                queryBuilder.Append('&');
             }
 
             if (options.OrderBy != null)
             {
                 queryBuilder.Append("$orderby=");
                 queryBuilder.Append(options.OrderBy.RawValue);
-                queryBuilder.Append("&");
+                queryBuilder.Append('&');
             }
 
             if (skipCount > 0)
             {
                 queryBuilder.Append("$skip=");
                 queryBuilder.Append(skipCount);
-                queryBuilder.Append("&");
+                queryBuilder.Append('&');
             }
 
             if (options.Top != null)
             {
                 queryBuilder.Append("$top=");
                 queryBuilder.Append(options.Top.RawValue);
-                queryBuilder.Append("&");
+                queryBuilder.Append('&');
             }
 
             if (semVerLevelKey != null)
@@ -405,7 +434,7 @@ namespace NuGetGallery.OData
                 {
                     queryBuilder.Append("semVerLevel=");
                     queryBuilder.Append(SemVerLevelKey.SemVerLevel2);
-                    queryBuilder.Append("&");
+                    queryBuilder.Append('&');
                 }
             }
 
